@@ -8,7 +8,7 @@ Entry point. Run with:
 Requirements:
     pip install pillow
     (tkinter is bundled with standard Python installations)
-
+claude
 Optional (for LLM prompt mode):
     pip install anthropic
     Set env var ANTHROPIC_API_KEY=<your key>

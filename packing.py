@@ -1,9 +1,9 @@
 """
 packing.py – Dart-throwing packing algorithm.
-
-Now weight-aware: accepts a dict of {label: weight} so that the
-LLM prompt mode and the sliders can influence room composition
-without touching the placement logic itself.
+Room-type constraint mirrors the original Processing code exactly:
+  ROOM_CONSTRAINT 0 = all rooms
+  ROOM_CONSTRAINT 1 = bedrooms only  (t in 0..0.5)
+  ROOM_CONSTRAINT 2 = public rooms   (t in 0.5..1)
 """
 
 from __future__ import annotations
@@ -14,13 +14,12 @@ from config import (
     GRID_SIZE, PAD, TRY,
     A_SIZES, B_SIZES, C_SIZES, D_SIZES,
     T1_SIZES, T2_SIZES, LIB_SIZES, RR_SIZES,
-    DEFAULT_WEIGHTS,
+    ROOM_CONSTRAINT,
 )
 from geometry_utils import snap_to_grid, overlaps_any
 from hotel import Hotel
 from rooms import ROOM_CLASSES
 
-# Map label → size palette
 _SIZE_MAP = {
     "BedroomA":    A_SIZES,
     "BedroomB":    B_SIZES,
@@ -33,42 +32,35 @@ _SIZE_MAP = {
 }
 
 
-def _weighted_choice(weights: Dict[str, float]) -> str:
-    """Pick a room-type label using the supplied weight dict."""
-    labels  = list(weights.keys())
-    totals  = list(weights.values())
-    return random.choices(labels, weights=totals, k=1)[0]
+def _t_to_label(t: float) -> str:
+    if   t < 1/8: return "BedroomA"
+    elif t < 2/8: return "BedroomB"
+    elif t < 3/8: return "BedroomC"
+    elif t < 4/8: return "BedroomD"
+    elif t < 5/8: return "TeaRoom1"
+    elif t < 6/8: return "TeaRoom2"
+    elif t < 7/8: return "Library"
+    else:         return "ReadingRoom"
 
 
 def pack_rooms_into_hotel(
-    site: Tuple[int, int, int, int],
+    site: Tuple[int,int,int,int],
     n_rooms: int,
-    weights: Dict[str, float] | None = None,
+    weights: Dict[str,float] | None = None,
     seed: int | None = None,
+    constraint: int | None = None,
 ) -> Hotel:
     """
-    Place up to n_rooms non-overlapping rooms inside site using dart-throwing.
-
-    Parameters
-    ----------
-    site    : (sx, sy, sw, sh) canvas-pixel rectangle
-    n_rooms : target number of rooms
-    weights : dict of {room_label: relative_weight}; defaults to equal weights
-    seed    : optional RNG seed for reproducibility
-
-    Returns
-    -------
-    A Hotel containing all successfully placed rooms.
+    constraint overrides config.ROOM_CONSTRAINT if supplied.
+      0 = all rooms
+      1 = bedrooms only
+      2 = public rooms only
     """
     if seed is not None:
         random.seed(seed)
 
-    if weights is None:
-        weights = DEFAULT_WEIGHTS.copy()
-
-    # Normalise weights so they sum to 1
-    total = sum(weights.values())
-    weights = {k: v / total for k, v in weights.items()}
+    # resolve constraint
+    con = constraint if constraint is not None else ROOM_CONSTRAINT
 
     sx, sy, sw, sh = site
     hotel = Hotel()
@@ -76,60 +68,50 @@ def pack_rooms_into_hotel(
     for _ in range(n_rooms):
         placed = False
         for _attempt in range(TRY):
-            label  = _weighted_choice(weights)
-            sizes  = _SIZE_MAP[label]
-            rw, rh = random.choice(sizes)
+            # mirror original Processing logic exactly
+            t = random.random()
+            if   con == 1: t = random.uniform(0, 0.5)
+            elif con == 2: t = random.uniform(0.5, 1.0)
 
-            # Guard: room must fit inside site
+            label  = _t_to_label(t)
+            rw, rh = random.choice(_SIZE_MAP[label])
+
             if rw >= sw or rh >= sh:
                 continue
 
-            x = snap_to_grid(random.uniform(sx, sx + sw - rw), GRID_SIZE)
-            y = snap_to_grid(random.uniform(sy, sy + sh - rh), GRID_SIZE)
+            x = snap_to_grid(random.uniform(sx, sx+sw-rw), GRID_SIZE)
+            y = snap_to_grid(random.uniform(sy, sy+sh-rh), GRID_SIZE)
 
-            candidate = (x, y, rw, rh)
-            if not overlaps_any(candidate, hotel.as_tuples(), pad=PAD):
-                room_cls = ROOM_CLASSES[label]
-                hotel.add_room(room_cls(x, y, rw, rh))
+            if not overlaps_any((x,y,rw,rh), hotel.as_tuples(), pad=PAD):
+                hotel.add_room(ROOM_CLASSES[label](x, y, rw, rh))
                 placed = True
                 break
 
         if not placed:
-            # Could not place this room after TRY attempts – skip
-            pass
+            pass   # skip, keep trying remaining rooms
 
     return hotel
 
 
 # ── Bush placement ─────────────────────────────────────────────
-
 from config import N_BUSHES, BUSH_TRY, BUSH_R_RANGE, BUSH_PAD
 
-
-def pack_bushes(
-    site: Tuple[int, int, int, int],
-    hotel: Hotel,
-    seed: int | None = None,
-) -> List[Tuple[int, int, int]]:
-    """Return a list of (x, y, r) bush positions that don't overlap rooms."""
+def pack_bushes(site, hotel, seed=None):
     if seed is not None:
-        random.seed(seed + 1)   # use a different offset so bushes don't mirror rooms
-
-    sx, sy, sw, sh = site
-    room_boxes = hotel.as_tuples()
-    bushes: List[Tuple[int, int, int]]       = []
-    bush_boxes: List[Tuple[int, int, int, int]] = []
-
+        random.seed(seed+1)
+    sx,sy,sw,sh = site
+    room_boxes   = hotel.as_tuples()
+    bushes: list = []
+    bush_boxes: list = []
     for _ in range(N_BUSHES):
-        for _attempt in range(BUSH_TRY):
+        for _a in range(BUSH_TRY):
             r = random.randint(*BUSH_R_RANGE)
-            x = snap_to_grid(random.uniform(sx + 2 * r, sx + sw - 2 * r), GRID_SIZE)
-            y = snap_to_grid(random.uniform(sy + 2 * r, sy + sh - 2 * r), GRID_SIZE)
-            box = (x - 2 * r, y - 2 * r, 4 * r, 4 * r)
-            if (not overlaps_any(box, room_boxes, pad=BUSH_PAD)
-                    and not overlaps_any(box, bush_boxes, pad=BUSH_PAD)):
-                bushes.append((x, y, r))
+            x = snap_to_grid(random.uniform(sx+2*r, sx+sw-2*r), GRID_SIZE)
+            y = snap_to_grid(random.uniform(sy+2*r, sy+sh-2*r), GRID_SIZE)
+            box = (x-2*r, y-2*r, 4*r, 4*r)
+            if (not overlaps_any(box, room_boxes,  pad=BUSH_PAD) and
+                not overlaps_any(box, bush_boxes,  pad=BUSH_PAD)):
+                bushes.append((x,y,r))
                 bush_boxes.append(box)
                 break
-
     return bushes

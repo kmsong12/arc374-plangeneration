@@ -1,5 +1,5 @@
 """
-llm_bridge.py – Translates a natural-language prompt into packing weights.
+llm_bridge.py - Translates a natural-language prompt into packing weights.
 
 Uses the Anthropic API (claude-sonnet-4-20250514).
 If the API key is not set, falls back to default weights silently.
@@ -36,9 +36,9 @@ Rules:
 - All values must be non-negative floats.
 - They do not need to sum to 1 (the caller normalises them).
 - Use 0.0 to exclude a room type completely.
-- Use higher values (e.g. 3.0–5.0) to make a type much more common.
+- Use higher values (e.g. 3.0-5.0) to make a type much more common.
 - Default weight for each type is 1.0.
-- Only output raw JSON – no code fences, no prose.
+- Only output raw JSON - no code fences, no prose.
 
 Example input: "mostly bedrooms, no library"
 Example output: {"BedroomA":3,"BedroomB":3,"BedroomC":2,"BedroomD":2,"TeaRoom1":1,"TeaRoom2":1,"Library":0,"ReadingRoom":1}
@@ -52,7 +52,7 @@ def prompt_to_weights(user_prompt: str) -> Dict[str, float]:
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        log.warning("ANTHROPIC_API_KEY not set – using default weights.")
+        log.warning("ANTHROPIC_API_KEY not set - using default weights.")
         return DEFAULT_WEIGHTS.copy()
 
     try:
@@ -76,5 +76,5 @@ def prompt_to_weights(user_prompt: str) -> Dict[str, float]:
         return cleaned
 
     except Exception as exc:
-        log.error("LLM call failed: %s – using default weights.", exc)
+        log.error("LLM call failed: %s - using default weights.", exc)
         return DEFAULT_WEIGHTS.copy()
