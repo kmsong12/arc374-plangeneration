@@ -3,7 +3,7 @@ config.py – All tuneable parameters.
 
 """
 
-# ── Canvas & site ──────────────────────────────────────────────
+# Canvas & site 
 CANVAS_W = 900
 CANVAS_H = 640
 

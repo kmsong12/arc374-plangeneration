@@ -4,10 +4,8 @@ llm_bridge.py - Translates a natural-language prompt into packing weights.
 Uses the Anthropic API (claude-sonnet-4-20250514).
 If the API key is not set, falls back to default weights silently.
 
-Usage
------
-    from llm_bridge import prompt_to_weights
-    weights = prompt_to_weights("More bedrooms in the north, tea room near entrance")
+from llm_bridge import prompt_to_weights
+weights = prompt_to_weights("More bedrooms in the north, tea room near entrance")
 """
 
 from __future__ import annotations

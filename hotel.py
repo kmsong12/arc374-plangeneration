@@ -9,12 +9,10 @@ from rooms import Room
 
 
 class Hotel:
-    """A Hotel 'has' rooms (composition)."""
-
     def __init__(self):
         self.rooms: List[Room] = []
 
-    # ── Mutation ───────────────────────────────────────────────
+    #  Mutation ------------------------------------------------
 
     def add_room(self, room: Room):
         self.rooms.append(room)
@@ -25,25 +23,23 @@ class Hotel:
     def clear(self):
         self.rooms.clear()
 
-    # ── Queries ────────────────────────────────────────────────
+    #  Queries --------------------------------------------------
 
     def as_tuples(self) -> List[Tuple[int, int, int, int]]:
         return [r.as_tuple() for r in self.rooms]
 
     def room_at(self, px: int, py: int) -> Room | None:
-        """Return the topmost room under pixel (px, py), or None."""
+        # Return the topmost room under pixel (px, py), or None.
         for room in reversed(self.rooms):
             if room.contains(px, py):
                 return room
         return None
 
-    # ── Metrics ────────────────────────────────────────────────
+    #  Metrics --------------------------------------------------
 
     def compute_metrics(self, site: Tuple[int, int, int, int]) -> Dict:
-        """
-        Return a dict of statistics for the metrics bar / panel.
-        site = (sx, sy, sw, sh)
-        """
+        # Return a dict of statistics for the metrics bar / panel.
+        # site = (sx, sy, sw, sh)
         sx, sy, sw, sh = site
         site_area  = sw * sh
         built_area = sum(r.area for r in self.rooms)

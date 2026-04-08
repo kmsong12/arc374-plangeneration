@@ -1,22 +1,16 @@
 """
 canvas_renderer.py  –  Draws the hotel plan on a Tkinter Canvas.
 
-Arc conversion rule (Processing → Tkinter):
+Arc conversion rule:
   Processing: arc(cx, cy, w, h, start, stop)
-    - centre is (cx, cy), bounding box is w×h
-    - angles clockwise from east: 0=E, HALF_PI=S, PI=W, 3*HALF_PI=N
   Tkinter: create_arc(x0,y0,x1,y1, start=, extent=)
-    - bounding box corners
-    - start: CCW from east (standard math)
-    - extent: CCW angular span (negative = clockwise)
 
   Conversion:
     x0 = cx - w/2,  y0 = cy - h/2
     x1 = cx + w/2,  y1 = cy + h/2
-    tk_start  = -proc_start_deg          (flip CW→CCW)
+    tk_start  = -proc_start_deg (flip CW to CCW)
     tk_extent = -(proc_stop - proc_start) in degrees
 
-  Processing HALF_PI = 90°, PI = 180°, TWO_PI = 360°
 """
 
 from __future__ import annotations
@@ -37,11 +31,6 @@ LIN   = 1
 BG    = "#ffffff"
 BLK   = "#000000"
 
-
-# ══════════════════════════════════════════════════════════════
-#  Primitive helpers
-# ══════════════════════════════════════════════════════════════
-
 def _rect(c, x, y, w, h, fill="", outline=BLK, width=1):
     if w <= 0 or h <= 0:
         return
@@ -51,16 +40,12 @@ def _line(c, x1, y1, x2, y2, fill=BLK, width=1):
     c.create_line(x1, y1, x2, y2, fill=fill, width=width)
 
 def _oval_center(c, cx, cy, rw, rh, fill="", outline=BLK, width=1):
-    """Ellipse specified by centre + radii."""
+    # Ellipse specified by center + radius.
     c.create_oval(cx-rw, cy-rh, cx+rw, cy+rh,
                   fill=fill, outline=outline, width=width)
 
 def _proc_arc(c, cx, cy, w, h, start_rad, stop_rad,
               outline=BLK, width=1):
-    """
-    Drop-in for Processing arc(cx, cy, w, h, start, stop).
-    start/stop in Processing radians (CW from east).
-    """
     # bounding box
     x0 = cx - w/2;  y0 = cy - h/2
     x1 = cx + w/2;  y1 = cy + h/2
@@ -78,6 +63,7 @@ _HALF_PI  = math.pi / 2
 _PI       = math.pi
 _TWO_PI   = math.pi * 2
 
+# helper functions
 def _wall_ring(c, x, y, w, h, t):
     _rect(c, x, y, w, h, fill=BLK, outline="")
     _rect(c, x+t, y+t, w-2*t, h-2*t, fill=BG, outline="")
@@ -96,12 +82,10 @@ def _cut_v(c, xc, yt, h, wt):
 
 # ── door arcs (exact port of Processing helpers) ──────────────
 def _door_arc_right(c, hx, hy, r):
-    """Processing: arc(hx,hy, 2r,2r, 0, HALF_PI)  line hx,hy → hx+r,hy"""
     _proc_arc(c, hx, hy, 2*r, 2*r, 0, _HALF_PI)
     _line(c, hx, hy, hx+r, hy)
 
 def _door_arc_up_right(c, hx, hy, r):
-    """Processing: arc(hx,hy, 2r,2r, PI+HALF_PI, TWO_PI)  line hx,hy → hx+r,hy"""
     _proc_arc(c, hx, hy, 2*r, 2*r, _PI+_HALF_PI, _TWO_PI)
     _line(c, hx, hy, hx+r, hy)
 
@@ -129,9 +113,7 @@ def _chair_sq(c, cx, cy, s=12):
     _rect(c, cx-s/2, cy-s/2, s, s)
 
 
-# ══════════════════════════════════════════════════════════════
-#  Room drawing functions — faithful port of room_utils.py
-# ══════════════════════════════════════════════════════════════
+#  Room drawing functions — port of room_utils.py
 
 def _draw_bedroom_A(c, x, y, rw, rh):
     A_BASE = 400.0
@@ -374,7 +356,7 @@ def _top_window(c, x, y, w, t):
     _line(c, wx-ext, y+t,         wx+win_w+ext, y+t)
 
 def _left_door(c, x, y, w, h, t):
-    # Processing: arc(x+t, oy+door_h, 2r,2r, PI+HALF_PI, TWO_PI)
+    # arc(x+t, oy+door_h, 2r,2r, PI+HALF_PI, TWO_PI)
     door_h=int(min(100, h*0.18)); oy=y+h-t-door_h
     _rect(c, x, oy, t, door_h, fill=BG, outline="")
     hx=x+t; hy=oy+door_h; r=door_h
@@ -542,9 +524,7 @@ def _draw_path(c, x, y, w, h):
         _line(c, x+w/2,y+2,x+w/2,y+h-2, fill="#C0B8A4")
 
 
-# ══════════════════════════════════════════════════════════════
 #  CanvasRenderer
-# ══════════════════════════════════════════════════════════════
 
 class CanvasRenderer:
     def __init__(self, canvas: tk.Canvas):

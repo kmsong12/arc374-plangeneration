@@ -79,10 +79,7 @@ class HotelApp:
         # Don't draw anything until generate runs
         self._generate()
 
-    # ══════════════════════════════════════════════════════════
-    #  UI
-    # ══════════════════════════════════════════════════════════
-
+    #  UI--------------------------------------------------------------
     def _build_ui(self):
         root = self.root
 
@@ -135,7 +132,7 @@ class HotelApp:
         self._build_right(body)
         self._build_canvas(body)
 
-    # ── left sidebar ──────────────────────────────────────────
+    # left sidebar ------------------------------------------------------
 
     def _build_left(self, parent):
         f = tk.Frame(parent, bg=C["panel"], width=SIDEBAR_LEFT_W,
@@ -178,7 +175,7 @@ class HotelApp:
                      font=("Helvetica", 8), bg=C["panel"],
                      fg=C["text_dim"]).pack(side="left")
 
-    # ── right sidebar ─────────────────────────────────────────
+    #  right sidebar ------------------------------------------------------
 
     def _build_right(self, parent):
         f = tk.Frame(parent, bg=C["panel"], width=SIDEBAR_RIGHT_W,
@@ -276,7 +273,7 @@ class HotelApp:
                  sliderrelief="flat", highlightthickness=0,
                  showvalue=False, length=170).pack(fill="x")
 
-    # ── canvas ────────────────────────────────────────────────
+    # canvas -----------------------------------------------------------
 
     def _build_canvas(self, parent):
         self._canvas = tk.Canvas(parent, bg=C["bg"],
@@ -307,10 +304,7 @@ class HotelApp:
         self.root.bind("<Delete>",    self._delete_selected)
         self.root.bind("<BackSpace>", self._delete_selected)
 
-    # ══════════════════════════════════════════════════════════
-    #  Site helpers
-    # ══════════════════════════════════════════════════════════
-
+    #  Site helpers-----------------------------------------------
     def _site(self):
         m = self._margin_var.get()
         w = self._canvas.winfo_width()  or CANVAS_W
@@ -321,10 +315,7 @@ class HotelApp:
         idx = CONSTRAINT_OPTIONS.index(self._constraint_var.get())
         return idx   # 0, 1, or 2
 
-    # ══════════════════════════════════════════════════════════
-    #  Generation
-    # ══════════════════════════════════════════════════════════
-
+    #  Generation------------------------------------------------
     def _generate(self):
         self.seed = random.randint(0, 10**9)
         self._seed_lbl.config(text=f"seed  {self.seed}")
@@ -365,9 +356,7 @@ class HotelApp:
         self.landscape_items = []
         self._redraw()
 
-    # ══════════════════════════════════════════════════════════
-    #  Redraw / metrics
-    # ══════════════════════════════════════════════════════════
+    #  Redraw / metrics--------------------------------------
 
     def _redraw(self, *_):
         if not hasattr(self, '_renderer'):
@@ -393,10 +382,7 @@ class HotelApp:
         self._m["open_area"].config(text=f"{m['open_area']:,} px²")
         self._m["density"].config(text=f"{m['density']}%")
 
-    # ══════════════════════════════════════════════════════════
-    #  Mouse
-    # ══════════════════════════════════════════════════════════
-
+    #  Mouse-------------------------------------------------------------------
     def _on_click(self, event):
         mx,my = event.x, event.y
         mode  = self.mode.get()
@@ -469,10 +455,7 @@ class HotelApp:
             self._update_metrics()
             self._redraw()
 
-    # ══════════════════════════════════════════════════════════
-    #  Callbacks
-    # ══════════════════════════════════════════════════════════
-
+    #  Callbacks-------------------------------------------------------
     def _on_mode_change(self):
         self._zone_rects   = []
         self._drag_start   = None
