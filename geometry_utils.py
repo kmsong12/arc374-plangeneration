@@ -1,6 +1,6 @@
 """
-geometry_utils.py – Low-level geometry helpers.
-Ported and extended from the Processing midterm version.
+geometry_utils.py – geometry helpers.
+
 """
 
 

@@ -1,8 +1,8 @@
 """
-rooms.py – Room data model (pure data, no drawing).
+rooms.py – Room data model.
 
-Drawing is handled by canvas_renderer.py so that the data layer
-stays decoupled from Tkinter.
+Drawing is handled by canvas_renderer.py 
+
 """
 
 from dataclasses import dataclass, field

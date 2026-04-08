@@ -1,6 +1,6 @@
 """
 hotel.py – Hotel model: a collection of Room objects.
-Pure data, no Tkinter.
+
 """
 
 from __future__ import annotations

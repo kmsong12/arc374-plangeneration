@@ -1,9 +1,10 @@
 """
 packing.py – Dart-throwing packing algorithm.
-Room-type constraint mirrors the original Processing code exactly:
+Room-type constraint:
   ROOM_CONSTRAINT 0 = all rooms
   ROOM_CONSTRAINT 1 = bedrooms only  (t in 0..0.5)
   ROOM_CONSTRAINT 2 = public rooms   (t in 0.5..1)
+  
 """
 
 from __future__ import annotations

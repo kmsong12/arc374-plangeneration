@@ -1,5 +1,6 @@
 """
-config.py – All tuneable parameters in one place.
+config.py – All tuneable parameters.
+
 """
 
 # ── Canvas & site ──────────────────────────────────────────────

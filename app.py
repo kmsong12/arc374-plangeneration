@@ -1,10 +1,6 @@
 """
 app.py – HotelApp: main Tkinter window.
-Fixes:
-  - Grid toggle now actually redraws
-  - Room filter dropdown wired to ROOM_CONSTRAINT (0/1/2)
-  - No stray canvas items before first generate
-  - Landscape items (bench/path) draw/drag working
+
 """
 
 from __future__ import annotations
