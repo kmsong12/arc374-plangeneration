@@ -568,6 +568,31 @@ class CanvasRenderer:
             self._draw_room(room, selected=(room is selected_room),
                             show_label=show_labels)
 
+    def draw_preview(self, label: str, base_w: int, base_h: int):
+        """Draw a single room centred on the canvas with no other elements."""
+        from rooms import ROOM_CLASSES
+        c = self.canvas
+        c.delete("all")
+        cw = c.winfo_width() or 900
+        ch = c.winfo_height() or 640
+        c.create_rectangle(0, 0, cw, ch, fill="#F0EDE5", outline="")
+
+        pad = 80
+        scale = min((cw - 2 * pad) / base_w, (ch - 2 * pad) / base_h)
+        rw = int(base_w * scale)
+        rh = int(base_h * scale)
+        x = (cw - rw) // 2
+        y = (ch - rh) // 2
+
+        room = ROOM_CLASSES[label](x, y, rw, rh)
+        self._draw_room(room, selected=False, show_label=False)
+
+        c.create_text(cw // 2, 24, text=label,
+                      font=("Helvetica", 13, "bold"), fill="#2C2C2A")
+        c.create_text(cw // 2, ch - 18,
+                      text="Click canvas to return",
+                      font=("Helvetica", 9), fill="#888880")
+
     def hit_test(self, px, py, hotel):
         return hotel.room_at(px, py)
 
