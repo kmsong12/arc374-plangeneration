@@ -10,12 +10,11 @@ from rooms import Room, ROOM_CLASSES
 
 
 class Hotel:
-    """A Hotel 'has' rooms (composition)."""
 
     def __init__(self):
         self.rooms: List[Room] = []
 
-    # ── Mutation ───────────────────────────────────────────────
+    #  Mutation ------------------------------------------------
 
     def add_room(self, room: Room):
         self.rooms.append(room)
@@ -30,7 +29,7 @@ class Hotel:
     def replace_rooms(self, rooms: List[Room]):
         self.rooms = list(rooms)
 
-    # ── Queries ────────────────────────────────────────────────
+    #  Queries --------------------------------------------------
 
     def as_tuples(self) -> List[Tuple[int,int,int,int]]:
         return [r.as_tuple() for r in self.rooms]
@@ -41,7 +40,7 @@ class Hotel:
                 return room
         return None
 
-    # ── Metrics ───────────────────────────────────────────────
+    #  Metrics --------------------------------------------------
 
     def compute_metrics(self, site: Tuple[int,int,int,int]) -> Dict:
         sx, sy, sw, sh = site
