@@ -1,5 +1,5 @@
 """
-hotel.py – Hotel model (pure data, no Tkinter).
+hotel.py - Hotel model (pure data, no Tkinter).
 Includes JSON serialisation for save/load.
 """
 
@@ -66,7 +66,7 @@ class Hotel:
             "avg_areas":   avg_areas,
         }
 
-    # ── Serialisation ──────────────────────────────────────────
+    # Serialisation --------------------------------------------------
 
     def to_dict(self) -> dict:
         return {"rooms": [
@@ -92,7 +92,7 @@ class Hotel:
         with open(path) as f:
             return cls.from_dict(json.load(f))
 
-    # ── Snapshot for undo ─────────────────────────────────────
+    # Snapshot for undo --------------------------------------------
 
     def snapshot(self) -> list:
         """Return a deep copy of room list for undo."""

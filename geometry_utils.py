@@ -1,5 +1,5 @@
 """
-geometry_utils.py – Low-level geometry helpers.
+geometry_utils.py - Low-level geometry helpers.
 """
 
 

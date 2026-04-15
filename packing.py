@@ -1,10 +1,10 @@
 """
-packing.py – Dart-throwing packing algorithm.
+packing.py - Dart-throwing packing algorithm.
 
 Supports:
-  • ROOM_CONSTRAINT 0/1/2 (all / bedrooms / public) — mirrors original
-  • Zone-constrained packing: rooms placed inside a list of zone rects
-  • Weighted room-type selection
+  * ROOM_CONSTRAINT 0/1/2 (all / bedrooms / public)
+  * Zone-constrained packing: rooms placed inside a list of zone rects
+  * Weighted room-type selection
 """
 
 from __future__ import annotations
@@ -81,10 +81,10 @@ def pack_rooms_into_hotel(
     Place up to n_rooms rooms inside site using dart-throwing.
 
     Parameters
-    ----------
+    ------------------------------------------------------------------------
     site         : (sx, sy, sw, sh)
     n_rooms      : target count
-    weights      : {label: weight} – controls room-type probabilities
+    weights      : {label: weight} - controls room-type probabilities
     seed         : RNG seed
     constraint   : 0=all, 1=bedrooms, 2=public  (overrides config if given)
     zones        : list of (x,y,w,h) — rooms placed inside these rectangles
@@ -100,7 +100,7 @@ def pack_rooms_into_hotel(
     sx, sy, sw, sh = site
     hotel = Hotel()
 
-    # ── Zone-constrained mode ──────────────────────────────────
+    # Zone-constrained mode ------------------------------------------------------
     if zones:
         for zi, zone in enumerate(zones):
             zx, zy, zw, zh = zone
@@ -129,7 +129,7 @@ def pack_rooms_into_hotel(
                         break
         return hotel
 
-    # ── Standard dart-throwing ────────────────────────────────
+    # Standard dart-throwing ---------------------------------------------------
     for _ in range(n_rooms):
         placed = False
         for _attempt in range(TRY):

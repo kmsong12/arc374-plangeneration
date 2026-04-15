@@ -1,5 +1,5 @@
 """
-rooms.py – Room data model.
+rooms.py - Room data model.
 
 Drawing is handled by canvas_renderer.py 
 
@@ -11,7 +11,7 @@ from typing import Tuple
 
 @dataclass
 class Room:
-    """Base room. All coordinates in canvas pixels."""
+    # Base room. All coordinates in canvas pixels.
     x: int
     y: int
     w: int

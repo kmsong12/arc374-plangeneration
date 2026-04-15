@@ -1,32 +1,32 @@
 """
-app.py – HotelApp: main Tkinter application.
+app.py - HotelApp: main Tkinter application.
 
 Implemented features
-─────────────────────────────────────────────────────────────────
+------------------------------------------------------------------------
 Modes
-  • Random / Procedural  – dart-throwing packing with sliders
-  • Drag & Drop          – click room in library to spawn, drag to place
-  • Zoning               – draw zone rects, then "Pack into zones"
-  • Bench / Path         – click-drag to draw landscape elements
-  • LLM Prompt           – text prompt → weights → regenerate
+  * Random / Procedural  - dart-throwing packing with sliders
+  * Drag & Drop          - click room in library to spawn, drag to place
+  * Zoning               - draw zone rects, then "Pack into zones"
+  * Bench / Path         - click-drag to draw landscape elements
+  * LLM Prompt           - text prompt → weights → regenerate
 
 Editing
-  • Select + drag room to reposition (snap-to-grid optional)
-  • Resize selected room by dragging the orange corner handle
-  • Delete selected room (Delete / Backspace key)
-  • Undo / Redo  (Cmd+Z / Cmd+Shift+Z  or  Ctrl+Z / Ctrl+Y)
+  * Select + drag room to reposition (snap-to-grid optional)
+  * Resize selected room by dragging the orange corner handle
+  * Delete selected room (Delete / Backspace key)
+  * Undo / Redo  (Cmd+Z / Cmd+Shift+Z  or  Ctrl+Z / Ctrl+Y)
 
 File
-  • Save layout to JSON  (Cmd/Ctrl+S)
-  • Load layout from JSON (Cmd/Ctrl+O)
-  • Export PNG screenshot
+  * Save layout to JSON  (Cmd/Ctrl+S)
+  * Load layout from JSON (Cmd/Ctrl+O)
+  * Export PNG screenshot
 
 Display
-  • Grid dots toggle
-  • Room labels toggle
-  • Bushes toggle
-  • Snap-to-grid toggle (toolbar)
-  • Per-room-type breakdown in expanded metrics tooltip
+  * Grid dots toggle
+  * Room labels toggle
+  * Bushes toggle
+  * Snap-to-grid toggle (toolbar)
+  * Per-room-type breakdown in expanded metrics tooltip
 
 Keyboard shortcuts
   R        Regenerate
@@ -141,14 +141,14 @@ class HotelApp:
 
         self._build_ui()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  UI construction
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _build_ui(self):
         root = self.root
 
-        # ── toolbar ──
+        # toolbar 
         tb = tk.Frame(root, bg=C["toolbar"], height=TOOLBAR_H,
                       highlightthickness=1, highlightbackground=C["sep"])
         tb.pack(side="top", fill="x")
@@ -184,7 +184,7 @@ class HotelApp:
         _btn("💾 Save",  self._save_layout)
         _btn("📂 Load",  self._load_layout)
 
-        # seed label — click to enter specific seed
+        # seed label - click to enter specific seed
         tk.Frame(tb, bg=C["toolbar"]).pack(side="left", expand=True)
         self._seed_lbl = tk.Label(tb, text=f"seed  {self.seed}",
                                   bg=C["toolbar"], fg=C["text_dim"],
@@ -195,7 +195,7 @@ class HotelApp:
 
         _btn("📷 Export PNG", self._export_png)
 
-        # ── metrics bar ──
+        # metrics bar
         mb = tk.Frame(root, bg=C["metric_bg"], height=METRICS_BAR_H,
                       highlightthickness=1, highlightbackground=C["sep"])
         mb.pack(side="bottom", fill="x")
@@ -206,7 +206,7 @@ class HotelApp:
             tk.Label(mb, text=label+":", bg=C["metric_bg"],
                      fg=C["text_dim"], font=("Helvetica", 9)).pack(
                 side="left", padx=(12,2))
-            v = tk.Label(mb, text="—", bg=C["metric_bg"],
+            v = tk.Label(mb, text="-", bg=C["metric_bg"],
                          fg=C["text"], font=("Helvetica", 9, "bold"))
             v.pack(side="left", padx=(0,10))
             self._m[key] = v
@@ -215,7 +215,7 @@ class HotelApp:
                  fg=C["accent"], font=("Helvetica", 9),
                  cursor="hand2").pack(side="right", padx=12)
 
-        # ── body ──
+        # body
         body = tk.Frame(root, bg=C["bg"])
         body.pack(side="top", fill="both", expand=True)
         self._build_left(body)
@@ -227,7 +227,7 @@ class HotelApp:
             if isinstance(w, tk.Label) and "breakdown" in str(w.cget("text")):
                 w.bind("<Button-1>", lambda e: self._show_breakdown())
 
-    # ── left sidebar ──────────────────────────────────────────
+    # left sidebar --------------------------------------------------------
 
     def _build_left(self, parent):
         f = tk.Frame(parent, bg=C["panel"], width=SIDEBAR_LEFT_W,
@@ -245,7 +245,7 @@ class HotelApp:
                            anchor="w", cursor="hand2").pack(
                 fill="x", padx=12, pady=1)
 
-        # zone pack button — only useful in zone mode
+        # zone pack button - only useful in zone mode
         self._zone_btn = tk.Label(f, text="  Pack into zones  →",
                                   bg=C["accent_lt"], fg=C["accent"],
                                   font=("Helvetica", 9), cursor="hand2",
@@ -284,7 +284,7 @@ class HotelApp:
             tk.Label(row, text=chip_lbl, font=("Helvetica", 9),
                      bg=C["panel"], fg=C["text_dim"]).pack(side="left")
 
-    # ── right sidebar ─────────────────────────────────────────
+    # right sidebar -----------------------------------------------
 
     def _build_right(self, parent):
         f = tk.Frame(parent, bg=C["panel"], width=SIDEBAR_RIGHT_W,
@@ -366,7 +366,7 @@ class HotelApp:
                                  bg=C["panel"], fg=C["text_dim"], anchor="w")
         self._sel_lbl.pack(fill="x")
 
-    # ── canvas ────────────────────────────────────────────────
+    # canvas ------------------------------------------------------------
 
     def _build_canvas(self, parent):
         self._canvas = tk.Canvas(parent, bg=C["bg"],
@@ -383,10 +383,10 @@ class HotelApp:
         cv.bind("<Configure>",
                 lambda e: self._redraw() if self.hotel.rooms else None)
 
-        # Only bind Cmd/Ctrl shortcuts — single-letter shortcuts removed
+        # Only bind Cmd/Ctrl shortcuts - single-letter shortcuts removed
         # entirely because they conflict with the LLM text box on macOS.
         # Use the toolbar buttons to regenerate, toggle grid, etc.
-        mod = "Command" if os.uname().sysname == "Darwin" else "Control"
+        mod = "Command" if self.root.tk.call("tk", "windowingsystem") == "aqua" else "Control"
         root = self.root
         root.bind(f"<{mod}-z>", lambda e: self._undo())
         root.bind(f"<{mod}-Z>", lambda e: self._redo())
@@ -398,7 +398,7 @@ class HotelApp:
         cv.bind("<Delete>",    self._delete_selected)
         cv.bind("<BackSpace>", self._delete_selected)
 
-    # ── widget helpers ────────────────────────────────────────
+    # widget helpers --------------------------------------------------------
 
     def _sec(self, parent, text):
         tk.Label(parent, text=text, font=("Helvetica", 8, "bold"),
@@ -431,9 +431,9 @@ class HotelApp:
                  sliderrelief="flat", highlightthickness=0,
                  showvalue=False, length=175).pack(fill="x")
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Site / geometry
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _site(self):
         m = self._margin_var.get()
@@ -461,9 +461,9 @@ class HotelApp:
         room.x = clamp(room.x, sx, sx+sw-room.w)
         room.y = clamp(room.y, sy, sy+sh-room.h)
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Undo / Redo
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _push_undo(self):
         self._undo_stack.append(self.hotel.snapshot())
@@ -489,9 +489,9 @@ class HotelApp:
         self._update_metrics()
         self._redraw()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Generation
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _generate(self):
         # If user manually regenerates, go back to slider-based weights
@@ -502,7 +502,7 @@ class HotelApp:
         self._run_packing()
 
     def _generate_manual(self):
-        """Called by the Regenerate button — clears LLM weights."""
+        """Called by the Regenerate button - clears LLM weights."""
         self._llm_weights_active = False
         self._llm_settings = {}
         self._llm_status.config(text="")
@@ -515,7 +515,7 @@ class HotelApp:
         site = self._site()
         sx, sy, sw, sh = site
 
-        # LLM spatial layout → auto-generate zones with per-zone weights
+        # LLM spatial layout -> auto-generate zones with per-zone weights
         llm_zones = zones
         llm_zone_weights = zone_weights
         if getattr(self, "_llm_weights_active", False) and not zones:
@@ -575,7 +575,7 @@ class HotelApp:
         if not prompt:
             return
         self._llm_btn.config(fg=C["text_dim"])
-        self._llm_status.config(text="⏳ Calling API…")
+        self._llm_status.config(text="Calling API...")
         self.root.update_idletasks()
 
         def _worker():
@@ -604,14 +604,14 @@ class HotelApp:
 
     def _on_llm_done(self):
         self._llm_weights_active = True
-        self._llm_status.config(text="✓ LLM weights active")
+        self._llm_status.config(text="LLM weights active")
         self._llm_btn.config(fg=C["accent"])
         self.root.after(3000, lambda: self._llm_status.config(text=""))
         self._generate()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Redraw / metrics
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _redraw(self, *_):
         if not hasattr(self, "_renderer"):
@@ -651,7 +651,7 @@ class HotelApp:
         if self.selected_room:
             r = self.selected_room
             self._sel_lbl.config(
-                text=f"{r.label}\n{r.w}×{r.h} px  @({r.x},{r.y})",
+                text=f"{r.label}\n{r.w}x{r.h} px  @({r.x},{r.y})",
                 fg=C["text"])
         else:
             self._sel_lbl.config(text="None", fg=C["text_dim"])
@@ -686,9 +686,9 @@ class HotelApp:
                   bg=C["accent_lt"], fg=C["accent"],
                   padx=12, pady=4).pack(pady=(10,14))
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Room preview
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _show_room_preview(self, label):
         from config import (A_SIZES, B_SIZES, C_SIZES, D_SIZES,
@@ -708,9 +708,9 @@ class HotelApp:
             self._room_preview = None
             self._redraw()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Library drag-to-canvas
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _library_press(self, event, label: str):
         """Record press position; spawn ghost room for drag-to-canvas."""
@@ -760,7 +760,7 @@ class HotelApp:
                 px, py = self._library_press_root
                 dist = math.hypot(event.x_root - px, event.y_root - py)
                 if dist < 5:
-                    # treat as a click → undo the add and show room preview
+                    # treat as a click -> undo the add and show room preview
                     label = self._spawning_room.label
                     self.hotel.remove_room(self._spawning_room)
                     if self._undo_stack:
@@ -777,9 +777,9 @@ class HotelApp:
             self._update_metrics()
             self._redraw()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Canvas mouse handlers
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _on_click(self, event):
         # Give the canvas keyboard focus so single-key shortcuts work
@@ -792,7 +792,7 @@ class HotelApp:
             self._exit_room_preview()
             return
 
-        # Bush drag — works in all modes
+        # Bush drag - works in all modes
         for i, (bx, by, br) in enumerate(self.bushes):
             if math.hypot(mx - bx, my - by) <= br:
                 self._bush_drag = (i, mx, my)
@@ -826,7 +826,7 @@ class HotelApp:
         mx, my = event.x, event.y
         mode   = self.mode.get()
 
-        # Bush drag — takes priority
+        # Bush drag - takes priority
         if self._bush_drag is not None:
             i, ox, oy = self._bush_drag
             bx, by, br = self.bushes[i]
@@ -941,16 +941,16 @@ class HotelApp:
             self._update_metrics()
             self._redraw()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Toolbar callbacks
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _on_mode_change(self):
         self._zone_start   = None
         self._path_start   = None
         self._drag_start   = None
         self._resize_start = None
-        # don't clear zone_rects when leaving zone mode — user keeps them
+        # don't clear zone_rects when leaving zone mode - user keeps them
         cursors = {"random":"fleur","drag":"hand2","zone":"crosshair",
                    "bench":"crosshair","path":"crosshair","llm":"arrow"}
         self._canvas.config(cursor=cursors.get(self.mode.get(),"crosshair"))
@@ -987,9 +987,9 @@ class HotelApp:
             self._seed_lbl.config(text=f"seed  {self.seed}")
             self._run_packing()
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Save / Load
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _save_layout(self):
         path = filedialog.asksaveasfilename(
@@ -1033,9 +1033,9 @@ class HotelApp:
         except Exception as e:
             messagebox.showerror("Load Error", str(e))
 
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
     #  Export PNG
-    # ══════════════════════════════════════════════════════════
+    # ------------------------------------------------------------------------
 
     def _export_png(self):
         try:

@@ -1,5 +1,5 @@
 """
-canvas_renderer.py  –  Draws the hotel plan on a Tkinter Canvas.
+canvas_renderer.py  -  Draws the hotel plan on a Tkinter Canvas.
 
 Arc conversion rule:
   Processing: arc(cx, cy, w, h, start, stop)
@@ -80,7 +80,7 @@ def _cut_h(c, xl, yc, w, wt):
 def _cut_v(c, xc, yt, h, wt):
     _rect(c, xc-wt/2, yt, wt, h, fill=BG, outline="")
 
-# ── door arcs (exact port of Processing helpers) ──────────────
+# door arcs (exact port of Processing helpers) 
 def _door_arc_right(c, hx, hy, r):
     _proc_arc(c, hx, hy, 2*r, 2*r, 0, _HALF_PI)
     _line(c, hx, hy, hx+r, hy)
@@ -113,7 +113,7 @@ def _chair_sq(c, cx, cy, s=12):
     _rect(c, cx-s/2, cy-s/2, s, s)
 
 
-#  Room drawing functions — port of room_utils.py
+#  Room drawing functions - port of room_utils.py
 
 def _draw_bedroom_A(c, x, y, rw, rh):
     A_BASE = 400.0
@@ -487,9 +487,9 @@ def _draw_library(c, x, y, rw, rh):
     _rect(c, bx9+rw*5/26, by9+rh*3/17, ww, r_h9, fill=BG, outline="")
 
 
-# ══════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------------
 #  Landscape elements
-# ══════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------------
 
 def _draw_bench(c, x, y, w, h, orient="h"):
     seat="#9C8462"; leg="#6B5740"; back="#7A6248"

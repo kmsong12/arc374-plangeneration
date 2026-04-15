@@ -1,15 +1,15 @@
 """
-llm_bridge.py – Translates a natural-language prompt into packing weights.
+llm_bridge.py - Translates a natural-language prompt into packing weights.
 
 API key lookup order (first match wins):
   1. Environment variable  ANTHROPIC_API_KEY
   2. A file called         .env  in the project folder  (KEY=value format)
   3. A file called         secrets.py  in the project folder
 
-To use option 2, create a file named  .env  (no extension) containing:
+option 2: create file named  .env  containing:
     ANTHROPIC_API_KEY=sk-ant-...
 
-To use option 3, create a file named  secrets.py  containing:
+option 3: create file named  secrets.py  containing:
     ANTHROPIC_API_KEY = "sk-ant-..."
 
 Both .env and secrets.py are listed in .gitignore so they are never
@@ -35,31 +35,31 @@ The user will describe what they want in a hotel floor plan in natural language.
 Your job is to output ONLY a JSON object (no markdown, no extra text) with any
 combination of the following keys:
 
-"weights": object — relative frequencies for each room type (all default to 1.0)
+"weights": object - relative frequencies for each room type (all default to 1.0)
   Keys: BedroomA, BedroomB, BedroomC, BedroomD (PRIVATE/bedroom rooms)
         TeaRoom1, TeaRoom2, Library, ReadingRoom  (PUBLIC/communal rooms)
   Use 0.0 to exclude a type, higher values (3-5) to make it more common.
 
-"n_rooms": int — total number of rooms to place (default 10, range 2-24)
+"n_rooms": int - total number of rooms to place (default 10, range 2-24)
   Use fewer rooms for more open/spacious layouts.
 
-"pad": int — padding in pixels between rooms (default 30, range 0-80)
+"pad": int - padding in pixels between rooms (default 30, range 0-80)
   Higher values = more open space between rooms.
 
-"n_bushes": int — number of bushes/greenery elements (default 30, range 0-80)
+"n_bushes": int - number of bushes/greenery elements (default 30, range 0-80)
   Use higher values for more greenery, 0 for none.
 
-"spatial": string — spatial arrangement of room types, one of:
-  "mixed"           — no spatial constraint (default)
-  "bedrooms_top"    — bedrooms placed in top half, public rooms in bottom half
-  "bedrooms_bottom" — bedrooms placed in bottom half, public rooms in top half
-  "bedrooms_left"   — bedrooms placed in left half, public rooms in right half
-  "bedrooms_right"  — bedrooms placed in right half, public rooms in left half
+"spatial": string - spatial arrangement of room types, one of:
+  "mixed"           - no spatial constraint (default)
+  "bedrooms_top"    - bedrooms placed in top half, public rooms in bottom half
+  "bedrooms_bottom" - bedrooms placed in bottom half, public rooms in top half
+  "bedrooms_left"   - bedrooms placed in left half, public rooms in right half
+  "bedrooms_right"  - bedrooms placed in right half, public rooms in left half
 
 Rules:
 - Only include keys that are relevant to the user's request.
 - Always include "weights".
-- Only output raw JSON — no code fences, no prose.
+- Only output raw JSON - no code fences, no prose.
 
 Examples:
 

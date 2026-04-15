@@ -1,5 +1,5 @@
 """
-config.py – All tuneable parameters.
+config.py - All tuneable parameters.
 
 """
 
@@ -17,7 +17,7 @@ TRY             = 200
 # 0 = all rooms, 1 = bedrooms only, 2 = public rooms only
 ROOM_CONSTRAINT = 0
 
-# ── Room size palettes ─────────────────────────────────────────
+# Room size palettes -----------------------------------------------------
 A_SIZES  = [(160, 220), (180, 240), (200, 260)]
 B_SIZES  = [(240, 160), (260, 180), (280, 190)]
 C_SIZES  = [(125, 125), (150, 150), (130, 130)]
@@ -34,7 +34,7 @@ DEFAULT_WEIGHTS = {
     "Library":     1/8, "ReadingRoom": 1/8,
 }
 
-# ── Colours ────────────────────────────────────────────────────
+# Colors -------------------------------------------------------------------
 SITE_BG      = "#FAFAF6"
 SITE_BORDER  = "#1a1a1a"
 CANVAS_BG    = "#E8E6DE"
@@ -63,13 +63,13 @@ ROOM_BORDERS = {
     "ReadingRoom": "#7B72D8",
 }
 
-# ── Bushes ─────────────────────────────────────────────────────
+# Bushes ---------------------------------------------------------------
 N_BUSHES     = 30
 BUSH_TRY     = 200
 BUSH_R_RANGE = (8, 16)
 BUSH_PAD     = 15
 
-# ── Panel sizes ────────────────────────────────────────────────
+# Panel sizes --------------------------------------------------------
 SIDEBAR_LEFT_W  = 192
 SIDEBAR_RIGHT_W = 215
 TOOLBAR_H       = 40

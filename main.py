@@ -1,5 +1,5 @@
 """
-ARC374 Final Project – Interactive Hotel Floor Plan Generator
+ARC374 Final Project - Interactive Hotel Floor Plan Generator
 Team: Chaemin Lim, Joshua Song, Ahania Soni
 
 """
