@@ -65,21 +65,27 @@ from llm_bridge import prompt_to_settings
 
 # ── palette ───────────────────────────────────────────────────
 C = {
-    "bg":        "#F0EDE5",
-    "panel":     "#FAFAF6",
-    "panel_bdr": "#D8D5CC",
-    "toolbar":   "#FFFFFF",
-    "accent":    "#2D6A9F",
-    "accent_lt": "#EBF3FB",
-    "text":      "#2C2C2A",
-    "text_dim":  "#888880",
-    "sep":       "#E2DFD7",
-    "warn_bg":   "#FFF8E1",
-    "warn_fg":   "#8A6800",
-    "metric_bg": "#F5F2EA",
-    "bench":     "#9C8462",
-    "path":      "#D4CCBA",
-    "handle":    "#E85D24",
+    "bg":          "#EDEBE6",    # warm canvas surround
+    "panel":       "#FFFFFF",    # sidebar bg
+    "panel_bdr":   "#E4E2DB",    # panel border
+    "toolbar":     "#1C1C1E",    # dark toolbar
+    "tb_text":     "#E4E4E7",    # toolbar primary text
+    "tb_dim":      "#71717A",    # toolbar secondary text
+    "tb_sep":      "#3F3F46",    # toolbar separator
+    "accent":      "#4A80BE",    # blue accent
+    "accent_lt":   "#EDF4FC",    # light accent bg
+    "accent_dark": "#2E6BAA",    # dark accent (hover)
+    "text":        "#18181B",    # primary text
+    "text_dim":    "#6B7280",    # secondary text
+    "text_xdim":   "#A1A1AA",    # tertiary / placeholder
+    "sep":         "#F0EDE8",    # separator line
+    "hover":       "#F5F4F1",    # list-item hover bg
+    "warn_bg":     "#FEF3C7",
+    "warn_fg":     "#92400E",
+    "metric_bg":   "#1C1C1E",    # dark status bar
+    "bench":       "#9C8462",
+    "path":        "#D4CCBA",
+    "handle":      "#F97316",
 }
 
 MODES = [
@@ -161,254 +167,399 @@ class HotelApp:
     def _build_ui(self):
         root = self.root
 
-        # toolbar 
-        tb = tk.Frame(root, bg=C["toolbar"], height=TOOLBAR_H,
-                      highlightthickness=1, highlightbackground=C["sep"])
+        # ── Toolbar (dark) ────────────────────────────────────────────────────
+        tb = tk.Frame(root, bg=C["toolbar"], height=44)
         tb.pack(side="top", fill="x")
         tb.pack_propagate(False)
 
-        def _btn(text, cmd, primary=False, parent=tb):
-            bg = C["accent_lt"] if primary else C["toolbar"]
-            fg = C["accent"]    if primary else C["text"]
-            b = tk.Label(parent, text=text, bg=bg, fg=fg,
-                         font=("Helvetica", 10), padx=10, cursor="hand2")
-            b.pack(side="left", padx=2, pady=5, ipady=3)
+        def _tbtn(text, cmd, primary=False):
+            if primary:
+                bg, bgh, fg = C["accent"], C["accent_dark"], "#FFFFFF"
+            else:
+                bg, bgh, fg = C["toolbar"], "#2C2C2E", C["tb_text"]
+            b = tk.Label(tb, text=text, bg=bg, fg=fg,
+                         font=("Helvetica", 10), padx=12, cursor="hand2")
+            b.pack(side="left", pady=8, ipady=2)
             b.bind("<Button-1>", lambda e: cmd())
-            b.bind("<Enter>",    lambda e: b.config(bg=C["accent_lt"]))
+            b.bind("<Enter>",    lambda e: b.config(bg=bgh))
             b.bind("<Leave>",    lambda e: b.config(bg=bg))
             return b
 
-        _btn("↺  Regenerate", self._generate_manual, primary=True)
-        self._vsep(tb)
-        _btn("⎌  Undo",       self._undo)
-        _btn("⎌  Redo",       self._redo)
-        self._vsep(tb)
+        def _tsep():
+            tk.Frame(tb, bg=C["tb_sep"], width=1).pack(
+                side="left", fill="y", pady=10, padx=4)
 
-        # snap toggle
-        self._snap_lbl = tk.Label(tb, text="Snap ✓", bg=C["toolbar"],
-                                  fg=C["accent"], font=("Helvetica", 9),
-                                  padx=8, cursor="hand2")
-        self._snap_lbl.pack(side="left", padx=2, pady=5, ipady=3)
+        _tbtn("↺  Regenerate", self._generate_manual, primary=True)
+        _tsep()
+        _tbtn("↩  Undo", self._undo)
+        _tbtn("↪  Redo", self._redo)
+        _tsep()
+
+        self._snap_lbl = tk.Label(
+            tb, text="⌗  Snap  ✓", bg=C["toolbar"],
+            fg=C["accent"], font=("Helvetica", 9), padx=10, cursor="hand2")
+        self._snap_lbl.pack(side="left", pady=8, ipady=2)
         self._snap_lbl.bind("<Button-1>", lambda e: self._toggle_snap())
 
-        self._vsep(tb)
-        _btn("Clear landscape", self._clear_landscape)
-        self._vsep(tb)
-        _btn("💾 Save",  self._save_layout)
-        _btn("📂 Load",  self._load_layout)
+        _tsep()
+        _tbtn("Clear landscape", self._clear_landscape)
+        _tsep()
+        _tbtn("💾  Save", self._save_layout)
+        _tbtn("📂  Load", self._load_layout)
 
-        # seed label - click to enter specific seed
         tk.Frame(tb, bg=C["toolbar"]).pack(side="left", expand=True)
-        self._seed_lbl = tk.Label(tb, text=f"seed  {self.seed}",
-                                  bg=C["toolbar"], fg=C["text_dim"],
-                                  font=("Courier", 9), cursor="hand2")
-        self._seed_lbl.pack(side="left", padx=8)
+        self._seed_lbl = tk.Label(
+            tb, text=f"seed  {self.seed}",
+            bg=C["toolbar"], fg=C["tb_dim"],
+            font=("Courier", 8), cursor="hand2")
+        self._seed_lbl.pack(side="left", padx=10)
         self._seed_lbl.bind("<Button-1>", lambda e: self._edit_seed())
         tk.Frame(tb, bg=C["toolbar"]).pack(side="left", expand=True)
 
-        _btn("📷 Export PNG", self._export_png)
+        _tbtn("📷  Export", self._export_png)
 
-        # metrics bar
-        mb = tk.Frame(root, bg=C["metric_bg"], height=METRICS_BAR_H,
-                      highlightthickness=1, highlightbackground=C["sep"])
+        # ── Status / metrics bar (dark, bottom) ───────────────────────────────
+        mb = tk.Frame(root, bg=C["metric_bg"], height=METRICS_BAR_H)
         mb.pack(side="bottom", fill="x")
         mb.pack_propagate(False)
         self._m = {}
-        for key, label in (("total_rooms","Rooms"),("built_area","Built"),
-                            ("open_area","Open"),("density","Density")):
-            tk.Label(mb, text=label+":", bg=C["metric_bg"],
-                     fg=C["text_dim"], font=("Helvetica", 9)).pack(
-                side="left", padx=(12,2))
-            v = tk.Label(mb, text="-", bg=C["metric_bg"],
-                         fg=C["text"], font=("Helvetica", 9, "bold"))
-            v.pack(side="left", padx=(0,10))
+        for key, lbl_text in (("total_rooms", "ROOMS"), ("built_area", "BUILT"),
+                               ("open_area", "OPEN"), ("density", "DENSITY")):
+            tk.Label(mb, text=lbl_text, bg=C["metric_bg"],
+                     fg=C["tb_dim"], font=("Helvetica", 7, "bold")).pack(
+                side="left", padx=(14, 3))
+            v = tk.Label(mb, text="—", bg=C["metric_bg"],
+                         fg=C["tb_text"], font=("Helvetica", 8, "bold"))
+            v.pack(side="left", padx=(0, 12))
             self._m[key] = v
-        # breakdown button
-        tk.Label(mb, text="▸ breakdown", bg=C["metric_bg"],
-                 fg=C["accent"], font=("Helvetica", 9),
-                 cursor="hand2").pack(side="right", padx=12)
 
-        # body
+        bd_btn = tk.Label(mb, text="details  ›", bg=C["metric_bg"],
+                          fg=C["accent"], font=("Helvetica", 8),
+                          cursor="hand2", padx=14)
+        bd_btn.pack(side="right")
+        bd_btn.bind("<Button-1>", lambda e: self._show_breakdown())
+        bd_btn.bind("<Enter>", lambda e: bd_btn.config(fg=C["tb_text"]))
+        bd_btn.bind("<Leave>", lambda e: bd_btn.config(fg=C["accent"]))
+
+        # ── Body ──────────────────────────────────────────────────────────────
         body = tk.Frame(root, bg=C["bg"])
         body.pack(side="top", fill="both", expand=True)
         self._build_left(body)
         self._build_right(body)
         self._build_canvas(body)
 
-        # bind breakdown click
-        for w in mb.winfo_children():
-            if isinstance(w, tk.Label) and "breakdown" in str(w.cget("text")):
-                w.bind("<Button-1>", lambda e: self._show_breakdown())
-
     # left sidebar --------------------------------------------------------
 
     def _build_left(self, parent):
-        f = tk.Frame(parent, bg=C["panel"], width=SIDEBAR_LEFT_W,
-                     highlightthickness=1, highlightbackground=C["panel_bdr"])
+        W = 206   # sidebar width
+
+        f = tk.Frame(parent, bg=C["panel"], width=W)
         f.pack(side="left", fill="y")
         f.pack_propagate(False)
 
-        self._sec(f, "MODE")
-        for val, label in MODES:
-            tk.Radiobutton(f, text=label, variable=self.mode, value=val,
-                           command=self._on_mode_change,
-                           bg=C["panel"], activebackground=C["accent_lt"],
-                           selectcolor=C["accent_lt"],
-                           fg=C["text"], font=("Helvetica", 10),
-                           anchor="w", cursor="hand2").pack(
-                fill="x", padx=12, pady=1)
+        # Right border line
+        tk.Frame(parent, bg=C["panel_bdr"], width=1).pack(side="left", fill="y")
 
-        # zone pack button - only useful in zone mode
-        self._zone_btn = tk.Label(f, text="  Pack into zones  →",
-                                  bg=C["accent_lt"], fg=C["accent"],
-                                  font=("Helvetica", 9), cursor="hand2",
-                                  padx=6, pady=4)
-        self._zone_btn.pack(fill="x", padx=12, pady=(4,0))
-        self._zone_btn.bind("<Button-1>", lambda e: self._pack_zones())
+        # ── local helpers ──────────────────────────────────────────────────────
+        def _sec(text):
+            tk.Label(f, text=text, font=("Helvetica", 7, "bold"),
+                     bg=C["panel"], fg=C["text_xdim"],
+                     anchor="w", padx=16).pack(fill="x", pady=(14, 3))
 
-        self._hsep(f)
-        self._sec(f, "ROOM LIBRARY  (drag to place)")
-        for lbl, col in ROOM_COLORS.items():
-            row = tk.Frame(f, bg=C["panel"], cursor="hand2")
-            row.pack(fill="x", padx=12, pady=2)
-            chip = tk.Frame(row, bg=col, width=20, height=12,
-                            highlightthickness=1,
-                            highlightbackground=ROOM_BORDERS[lbl],
-                            cursor="hand2")
-            chip.pack(side="left", padx=(0,7))
-            name_lbl = tk.Label(row, text=lbl, font=("Helvetica", 9),
+        def _hsep():
+            tk.Frame(f, bg=C["sep"], height=1).pack(fill="x", pady=3)
+
+        def _lib_row(label_text, chip_color, chip_border,
+                     press_cmd, motion_cmd, release_cmd):
+            """One item row with full-width hover highlight."""
+            row   = tk.Frame(f, bg=C["panel"], cursor="hand2")
+            row.pack(fill="x")
+            inner = tk.Frame(row, bg=C["panel"])
+            inner.pack(fill="x", padx=16, pady=5)
+            chip  = tk.Frame(inner, bg=chip_color, width=10, height=10,
+                             highlightthickness=1,
+                             highlightbackground=chip_border)
+            chip.pack(side="left", padx=(0, 9))
+            chip.pack_propagate(False)
+            name_lbl = tk.Label(inner, text=label_text, font=("Helvetica", 9),
                                 bg=C["panel"], fg=C["text"], cursor="hand2")
             name_lbl.pack(side="left")
-            # bind both chip and label for drag-to-canvas
-            for w in (chip, name_lbl, row):
-                w.bind("<ButtonPress-1>",
-                       lambda e, l=lbl: self._library_press(e, l))
-                w.bind("<B1-Motion>",   self._library_drag)
-                w.bind("<ButtonRelease-1>", self._library_release)
+            hw = [row, inner, name_lbl]
 
-        self._hsep(f)
-        self._sec(f, "LANDSCAPE  (Bench / Path modes)")
-        for chip_lbl, chip_col in (("Bench", C["bench"]),("Path", C["path"])):
-            row = tk.Frame(f, bg=C["panel"])
-            row.pack(fill="x", padx=12, pady=2)
-            tk.Frame(row, bg=chip_col, width=20, height=12,
+            def _e(e):
+                for w in hw:
+                    w.config(bg=C["hover"])
+            def _l(e):
+                for w in hw:
+                    w.config(bg=C["panel"])
+
+            for w in (row, inner, chip, name_lbl):
+                w.bind("<Enter>",          _e)
+                w.bind("<Leave>",          _l)
+                w.bind("<ButtonPress-1>",  press_cmd)
+                w.bind("<B1-Motion>",      motion_cmd)
+                w.bind("<ButtonRelease-1>", release_cmd)
+
+        # ── MODE ──────────────────────────────────────────────────────────────
+        _sec("MODE")
+        self._mode_btns = {}
+
+        def _mode_item(val, text):
+            row = tk.Frame(f, bg=C["panel"], cursor="hand2")
+            row.pack(fill="x")
+            ind = tk.Frame(row, bg=C["panel"], width=3)
+            ind.pack(side="left", fill="y")
+            lbl = tk.Label(row, text=text, font=("Helvetica", 9),
+                           bg=C["panel"], fg=C["text_dim"],
+                           anchor="w", padx=13, pady=5, cursor="hand2")
+            lbl.pack(side="left", fill="x", expand=True)
+
+            def _click(e=None):
+                self.mode.set(val)
+                self._on_mode_change()
+
+            def _enter(e, r=row, l=lbl):
+                if self.mode.get() != val:
+                    r.config(bg=C["hover"])
+                    l.config(bg=C["hover"])
+
+            def _leave(e, v=val):
+                self._refresh_mode_btns()
+
+            for w in (row, lbl):
+                w.bind("<Button-1>", _click)
+                w.bind("<Enter>",    _enter)
+                w.bind("<Leave>",    _leave)
+
+            self._mode_btns[val] = (row, ind, lbl)
+
+        for val, label in MODES:
+            _mode_item(val, label)
+
+        # Zone pack button
+        self._zone_btn = tk.Label(
+            f, text="Pack into zones  →",
+            bg=C["accent"], fg="#FFFFFF",
+            font=("Helvetica", 9), cursor="hand2",
+            padx=16, pady=5)
+        self._zone_btn.pack(fill="x", padx=16, pady=(4, 4))
+        self._zone_btn.bind("<Button-1>", lambda e: self._pack_zones())
+        self._zone_btn.bind("<Enter>",
+                            lambda e: self._zone_btn.config(bg=C["accent_dark"]))
+        self._zone_btn.bind("<Leave>",
+                            lambda e: self._zone_btn.config(bg=C["accent"]))
+
+        _hsep()
+
+        # ── ROOM LIBRARY ──────────────────────────────────────────────────────
+        _sec("ROOM LIBRARY")
+        tk.Label(f, text="Drag to canvas  •  Click to preview",
+                 font=("Helvetica", 7), bg=C["panel"], fg=C["text_xdim"],
+                 anchor="w", padx=16).pack(fill="x", pady=(0, 4))
+
+        for lbl, col in ROOM_COLORS.items():
+            _lib_row(lbl, col, ROOM_BORDERS[lbl],
+                     lambda e, l=lbl: self._library_press(e, l),
+                     self._library_drag,
+                     self._library_release)
+
+        _hsep()
+
+        # ── LANDSCAPE ─────────────────────────────────────────────────────────
+        _sec("LANDSCAPE")
+        tk.Label(f, text="Select Bench or Path mode above",
+                 font=("Helvetica", 7), bg=C["panel"], fg=C["text_xdim"],
+                 anchor="w", padx=16).pack(fill="x", pady=(0, 4))
+
+        for chip_lbl, chip_col in (("Bench", C["bench"]), ("Path", C["path"])):
+            row   = tk.Frame(f, bg=C["panel"])
+            row.pack(fill="x")
+            inner = tk.Frame(row, bg=C["panel"])
+            inner.pack(fill="x", padx=16, pady=4)
+            tk.Frame(inner, bg=chip_col, width=10, height=10,
                      highlightthickness=1,
-                     highlightbackground="#888").pack(side="left", padx=(0,7))
-            tk.Label(row, text=chip_lbl, font=("Helvetica", 9),
+                     highlightbackground="#999").pack(side="left", padx=(0, 9))
+            tk.Label(inner, text=chip_lbl, font=("Helvetica", 9),
                      bg=C["panel"], fg=C["text_dim"]).pack(side="left")
 
-        self._hsep(f)
-        self._sec(f, "FURNITURE  (drag to place)")
-        tk.Label(f, text="Right-click room to pin/unpin",
-                 font=("Helvetica", 7), bg=C["panel"],
-                 fg=C["text_dim"], anchor="w").pack(fill="x", padx=12)
+        _hsep()
+
+        # ── FURNITURE ─────────────────────────────────────────────────────────
+        _sec("FURNITURE")
+        tk.Label(f, text="Drag into a room  •  Right-click to pin",
+                 font=("Helvetica", 7), bg=C["panel"], fg=C["text_xdim"],
+                 anchor="w", padx=16).pack(fill="x", pady=(0, 4))
+
         for fname, finfo in FURNITURE_ITEMS.items():
-            fcol    = FURNITURE_COLORS[fname]
-            fborder = FURNITURE_BORDERS[fname]
-            row = tk.Frame(f, bg=C["panel"], cursor="hand2")
-            row.pack(fill="x", padx=12, pady=2)
-            chip = tk.Frame(row, bg=fcol, width=20, height=12,
-                            highlightthickness=1,
-                            highlightbackground=fborder,
-                            cursor="hand2")
-            chip.pack(side="left", padx=(0, 7))
-            name_lbl = tk.Label(row, text=fname, font=("Helvetica", 9),
-                                bg=C["panel"], fg=C["text"], cursor="hand2")
-            name_lbl.pack(side="left")
-            for w in (chip, name_lbl, row):
-                w.bind("<ButtonPress-1>",
-                       lambda e, n=fname, info=finfo:
-                           self._flib_press(e, n, info))
-                w.bind("<B1-Motion>",    self._flib_drag)
-                w.bind("<ButtonRelease-1>", self._flib_release)
+            _lib_row(fname,
+                     FURNITURE_COLORS[fname], FURNITURE_BORDERS[fname],
+                     lambda e, n=fname, i=finfo: self._flib_press(e, n, i),
+                     self._flib_drag,
+                     self._flib_release)
+
+        # set initial mode highlight
+        self._refresh_mode_btns()
 
     # right sidebar -----------------------------------------------
 
     def _build_right(self, parent):
-        f = tk.Frame(parent, bg=C["panel"], width=SIDEBAR_RIGHT_W,
-                     highlightthickness=1, highlightbackground=C["panel_bdr"])
+        W = 218   # sidebar width
+
+        # Left border line
+        tk.Frame(parent, bg=C["panel_bdr"], width=1).pack(side="right", fill="y")
+
+        f = tk.Frame(parent, bg=C["panel"], width=W)
         f.pack(side="right", fill="y")
         f.pack_propagate(False)
 
+        # Scrollable inner frame
         inn = tk.Frame(f, bg=C["panel"])
-        inn.pack(fill="both", expand=True, padx=10, pady=10)
+        inn.pack(fill="both", expand=True)
 
-        self._sec(inn, "PARAMETERS")
+        # ── local helpers ──────────────────────────────────────────────────────
+        def _sec(text):
+            tk.Label(inn, text=text, font=("Helvetica", 7, "bold"),
+                     bg=C["panel"], fg=C["text_xdim"],
+                     anchor="w", padx=16).pack(fill="x", pady=(14, 3))
+
+        def _hsep():
+            tk.Frame(inn, bg=C["sep"], height=1).pack(fill="x", pady=4)
+
+        def _slider(label, var, lo, hi, step, cb=None):
+            row = tk.Frame(inn, bg=C["panel"])
+            row.pack(fill="x", padx=16, pady=(5, 0))
+            top = tk.Frame(row, bg=C["panel"])
+            top.pack(fill="x")
+            tk.Label(top, text=label, font=("Helvetica", 9),
+                     bg=C["panel"], fg=C["text_dim"],
+                     anchor="w").pack(side="left")
+            val_lbl = tk.Label(top, text=str(var.get()),
+                               font=("Helvetica", 9, "bold"),
+                               bg=C["panel"], fg=C["text"])
+            val_lbl.pack(side="right")
+            def _tr(*_):
+                val_lbl.config(text=str(var.get()))
+                if cb: cb()
+            var.trace_add("write", _tr)
+            tk.Scale(row, variable=var, from_=lo, to=hi, resolution=step,
+                     orient="horizontal", bg=C["panel"],
+                     troughcolor=C["sep"], highlightthickness=0,
+                     sliderrelief="flat", activebackground=C["accent"],
+                     showvalue=False, sliderlength=14, bd=0,
+                     length=185).pack(fill="x", pady=(2, 0))
+
+        def _toggle_row(text, var, cmd):
+            row = tk.Frame(inn, bg=C["panel"], cursor="hand2")
+            row.pack(fill="x")
+            lbl = tk.Label(row, text=text, font=("Helvetica", 9),
+                           bg=C["panel"], fg=C["text"],
+                           anchor="w", padx=16, pady=5, cursor="hand2")
+            lbl.pack(side="left", fill="x", expand=True)
+            dot = tk.Label(row, font=("Helvetica", 11),
+                           bg=C["panel"], padx=12, cursor="hand2")
+            dot.pack(side="right")
+
+            def _refresh():
+                dot.config(text="●" if var.get() else "○",
+                           fg=C["accent"] if var.get() else C["text_xdim"])
+            _refresh()
+
+            def _toggle(e=None):
+                var.set(not var.get())
+                _refresh()
+                cmd()
+
+            def _ent(e, r=row, l=lbl, d=dot):
+                for w in (r, l, d): w.config(bg=C["hover"])
+            def _lv(e, r=row, l=lbl, d=dot):
+                for w in (r, l, d): w.config(bg=C["panel"])
+
+            for w in (row, lbl, dot):
+                w.bind("<Button-1>", _toggle)
+                w.bind("<Enter>",    _ent)
+                w.bind("<Leave>",    _lv)
+
+        # ── PARAMETERS ────────────────────────────────────────────────────────
+        _sec("PARAMETERS")
         self._n_rooms_var  = tk.IntVar(value=10)
         self._pad_var      = tk.IntVar(value=30)
         self._bed_bias_var = tk.IntVar(value=50)
         self._margin_var   = tk.IntVar(value=SITE_MARGIN)
 
-        self._slider(inn, "Room count",       self._n_rooms_var,  2, 24, 1)
-        self._slider(inn, "Padding (px)",     self._pad_var,      0, 80, 5)
-        self._slider(inn, "Bedroom bias (%)", self._bed_bias_var, 0, 100, 5,
-                     cb=self._update_weights)
-        self._slider(inn, "Site margin (px)", self._margin_var,   20, 120, 5)
+        _slider("Room count",       self._n_rooms_var,  2, 24, 1)
+        _slider("Padding (px)",     self._pad_var,      0, 80, 5)
+        _slider("Bedroom bias (%)", self._bed_bias_var, 0, 100, 5,
+                cb=self._update_weights)
+        _slider("Site margin (px)", self._margin_var,   20, 120, 5)
 
         tk.Label(inn, text="Room filter", font=("Helvetica", 9),
-                 bg=C["panel"], fg=C["text_dim"], anchor="w").pack(
-            fill="x", pady=(8,2))
+                 bg=C["panel"], fg=C["text_dim"],
+                 anchor="w", padx=16).pack(fill="x", pady=(10, 2))
         self._constraint_var = tk.StringVar(value=CONSTRAINT_OPTIONS[0])
         ttk.Combobox(inn, textvariable=self._constraint_var,
                      values=CONSTRAINT_OPTIONS, state="readonly",
-                     font=("Helvetica", 9)).pack(fill="x")
+                     font=("Helvetica", 9)).pack(fill="x", padx=16)
 
-        self._hsep(inn)
-        self._sec(inn, "DISPLAY")
-        for text, var in (("Grid",         self._show_grid),
-                           ("Room labels", self._show_labels),
-                           ("Bushes",      self._show_bushes)):
-            tk.Checkbutton(inn, text=text, variable=var,
-                           command=self._redraw,
-                           font=("Helvetica", 9), bg=C["panel"],
-                           activebackground=C["panel"],
-                           fg=C["text"], anchor="w",
-                           cursor="hand2").pack(fill="x", pady=1)
+        _hsep()
 
-        self._hsep(inn)
+        # ── DISPLAY ───────────────────────────────────────────────────────────
+        _sec("DISPLAY")
+        _toggle_row("Grid dots",   self._show_grid,   self._redraw)
+        _toggle_row("Room labels", self._show_labels, self._redraw)
+        _toggle_row("Bushes",      self._show_bushes, self._redraw)
 
-        # LLM section
+        _hsep()
+
+        # ── LLM PROMPT ────────────────────────────────────────────────────────
         hdr = tk.Frame(inn, bg=C["panel"])
-        hdr.pack(fill="x", pady=(0,4))
-        tk.Label(hdr, text="LLM PROMPT", font=("Helvetica", 8, "bold"),
-                 bg=C["panel"], fg=C["text_dim"]).pack(side="left")
-        tk.Label(hdr, text=" beta", font=("Helvetica", 7),
+        hdr.pack(fill="x", padx=16, pady=(0, 4))
+        tk.Label(hdr, text="LLM PROMPT", font=("Helvetica", 7, "bold"),
+                 bg=C["panel"], fg=C["text_xdim"]).pack(side="left")
+        tk.Label(hdr, text="beta", font=("Helvetica", 7),
                  bg=C["warn_bg"], fg=C["warn_fg"],
-                 padx=3).pack(side="left", padx=4)
+                 padx=4, pady=1).pack(side="left", padx=6)
 
-        self._llm_txt = tk.Text(inn, height=4, font=("Helvetica", 9),
-                                relief="flat", bg="#F5F3EC", fg=C["text"],
+        self._llm_txt = tk.Text(inn, height=3, font=("Helvetica", 9),
+                                relief="flat", bg=C["hover"], fg=C["text"],
                                 highlightthickness=1,
                                 highlightbackground=C["sep"],
-                                wrap="word", bd=0)
-        self._llm_txt.pack(fill="x", pady=(0,4))
+                                wrap="word", bd=0, padx=8, pady=6)
+        self._llm_txt.pack(fill="x", padx=16, pady=(0, 6))
         self._llm_txt.insert("end",
             "e.g. More bedrooms in the north, tea room near entrance")
 
-        self._llm_btn = tk.Label(inn, text="Generate with prompt  ↗",
-                                 bg=C["accent_lt"], fg=C["accent"],
-                                 font=("Helvetica", 9), padx=8, pady=5,
-                                 cursor="hand2")
-        self._llm_btn.pack(fill="x")
+        self._llm_btn = tk.Label(
+            inn, text="Generate with prompt  ↗",
+            bg=C["accent"], fg="#FFFFFF",
+            font=("Helvetica", 9), padx=8, pady=6, cursor="hand2")
+        self._llm_btn.pack(fill="x", padx=16)
         self._llm_btn.bind("<Button-1>", lambda e: self._llm_generate())
+        self._llm_btn.bind("<Enter>",
+                           lambda e: self._llm_btn.config(bg=C["accent_dark"]))
+        self._llm_btn.bind("<Leave>",
+                           lambda e: self._llm_btn.config(bg=C["accent"]))
 
-        # LLM status label (hidden until a call is in flight)
         self._llm_status = tk.Label(inn, text="", font=("Helvetica", 8),
                                     bg=C["panel"], fg=C["accent"])
-        self._llm_status.pack(fill="x", pady=(2,0))
+        self._llm_status.pack(fill="x", padx=16, pady=(4, 0))
 
-        self._hsep(inn)
-        # Selected-room info
-        self._sec(inn, "SELECTED ROOM")
-        self._sel_lbl = tk.Label(inn, text="None", font=("Helvetica", 9),
-                                 bg=C["panel"], fg=C["text_dim"], anchor="w")
+        _hsep()
+
+        # ── SELECTED ROOM ─────────────────────────────────────────────────────
+        _sec("SELECTED ROOM")
+        self._sel_lbl = tk.Label(
+            inn, text="None", font=("Helvetica", 9),
+            bg=C["panel"], fg=C["text_xdim"],
+            anchor="w", padx=16, pady=2,
+            wraplength=W - 32, justify="left")
         self._sel_lbl.pack(fill="x")
-        # Reset furniture button (enabled when selected room has furniture)
+
         self._reset_furn_btn = tk.Label(
             inn, text="Reset furniture",
             bg=C["sep"], fg=C["text_dim"],
-            font=("Helvetica", 8), padx=6, pady=3, cursor="arrow")
-        self._reset_furn_btn.pack(fill="x", pady=(4, 0))
+            font=("Helvetica", 8), padx=16, pady=5,
+            cursor="arrow", anchor="w")
+        self._reset_furn_btn.pack(fill="x", padx=16, pady=(6, 0))
         self._reset_furn_btn.bind("<Button-1>",
                                   lambda e: self._reset_room_furniture())
 
@@ -1513,13 +1664,29 @@ class HotelApp:
         cursors = {"random":"fleur","drag":"hand2","zone":"crosshair",
                    "bench":"crosshair","path":"crosshair","llm":"arrow"}
         self._canvas.config(cursor=cursors.get(self.mode.get(),"crosshair"))
+        self._refresh_mode_btns()
         self._redraw()
+
+    def _refresh_mode_btns(self):
+        """Update mode button highlight to match self.mode."""
+        if not hasattr(self, "_mode_btns"):
+            return
+        cur = self.mode.get()
+        for val, (row, ind, lbl) in self._mode_btns.items():
+            if val == cur:
+                row.config(bg=C["accent_lt"])
+                ind.config(bg=C["accent"])
+                lbl.config(bg=C["accent_lt"], fg=C["accent"])
+            else:
+                row.config(bg=C["panel"])
+                ind.config(bg=C["panel"])
+                lbl.config(bg=C["panel"], fg=C["text_dim"])
 
     def _toggle_snap(self):
         self._snap_on = not self._snap_on
         self._snap_lbl.config(
-            text="Snap ✓" if self._snap_on else "Snap",
-            fg=C["accent"] if self._snap_on else C["text_dim"])
+            text="⌗  Snap  ✓" if self._snap_on else "⌗  Snap",
+            fg=C["accent"] if self._snap_on else C["tb_dim"])
 
     def _update_weights(self):
         # Don't override weights if LLM just set them
