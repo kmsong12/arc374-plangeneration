@@ -72,7 +72,7 @@ class Hotel:
     def to_dict(self) -> dict:
         return {"rooms": [
             {"label": r.label, "x": r.x, "y": r.y, "w": r.w, "h": r.h,
-             "pinned": r.pinned}
+             "pinned": r.pinned, "furniture": r.furniture}
             for r in self.rooms
         ]}
 
@@ -82,8 +82,10 @@ class Hotel:
         for d in data.get("rooms", []):
             room_cls = ROOM_CLASSES.get(d["label"])
             if room_cls:
-                h.add_room(room_cls(d["x"], d["y"], d["w"], d["h"],
-                                    pinned=d.get("pinned", False)))
+                room = room_cls(d["x"], d["y"], d["w"], d["h"],
+                                pinned=d.get("pinned", False))
+                room.furniture = d.get("furniture", [])
+                h.add_room(room)
         return h
 
     def save_json(self, path: str):
@@ -98,11 +100,13 @@ class Hotel:
     # Snapshot for undo --------------------------------------------
 
     def snapshot(self) -> list:
-        """Return a deep copy of room list for undo."""
-        return [
-            ROOM_CLASSES[r.label](r.x, r.y, r.w, r.h, pinned=r.pinned)
-            for r in self.rooms
-        ]
+        """Return a deep copy of room list (including per-room furniture) for undo."""
+        result = []
+        for r in self.rooms:
+            new_r = ROOM_CLASSES[r.label](r.x, r.y, r.w, r.h, pinned=r.pinned)
+            new_r.furniture = copy.deepcopy(r.furniture)
+            result.append(new_r)
+        return result
 
     def restore(self, snapshot: list):
         self.rooms = snapshot

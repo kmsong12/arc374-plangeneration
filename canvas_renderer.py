@@ -591,10 +591,14 @@ class CanvasRenderer:
         self.canvas = canvas
 
     def draw(self, site, hotel, bushes,
-             landscape_items=None, placed_furniture=None,
+             landscape_items=None,
              show_grid=True, show_labels=False,
              selected_room=None, zone_rects=None,
-             selected_furniture_idx=None):
+             sel_furn=None):
+        """
+        sel_furn: (room_ref, idx) tuple identifying the selected furniture item,
+                  or None if no furniture is selected.
+        """
         c=self.canvas; c.delete("all")
         sx,sy,sw,sh=site
         cw=c.winfo_width() or 2000; ch=c.winfo_height() or 2000
@@ -628,13 +632,8 @@ class CanvasRenderer:
 
         for room in hotel.rooms:
             self._draw_room(room, selected=(room is selected_room),
-                            show_label=show_labels)
-
-        # Furniture items drawn on top of rooms so they're always visible
-        if placed_furniture:
-            for i, item in enumerate(placed_furniture):
-                _draw_furniture_item(c, item,
-                                     selected=(i == selected_furniture_idx))
+                            show_label=show_labels,
+                            sel_furn=sel_furn)
 
     def draw_preview(self, label: str, base_w: int, base_h: int):
         """Draw a single room centred on the canvas with no other elements."""
@@ -680,7 +679,7 @@ class CanvasRenderer:
                 c.create_oval(bx+ox-r,by+oy-r,bx+ox+r,by+oy+r,
                               fill="#1A8A60",outline="#0A5C40",width=0.5)
 
-    def _draw_room(self, room, selected, show_label):
+    def _draw_room(self, room, selected, show_label, sel_furn=None):
         c=self.canvas; lbl=room.label
         fill_col=ROOM_COLORS.get(lbl,"#F0EEE8")
         line_col=ROOM_BORDERS.get(lbl,"#888")
@@ -691,6 +690,12 @@ class CanvasRenderer:
             self._draw_interior(room)
         except Exception:
             pass
+        # Per-room furniture (drawn on top of interior, room-relative → absolute)
+        for i, fitem in enumerate(getattr(room, "furniture", [])):
+            abs_item = dict(fitem, x=room.x + fitem["x"], y=room.y + fitem["y"])
+            is_sel = (sel_furn is not None and
+                      sel_furn[0] is room and sel_furn[1] == i)
+            _draw_furniture_item(c, abs_item, selected=is_sel)
         # Pin indicator: small filled circle in top-right corner
         if getattr(room, "pinned", False):
             px = room.x + room.w - 8
