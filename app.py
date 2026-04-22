@@ -40,6 +40,7 @@ Keyboard shortcuts
 """
 
 from __future__ import annotations
+import copy
 import json
 import math
 import os
@@ -53,6 +54,7 @@ from config import (
     SIDEBAR_LEFT_W, SIDEBAR_RIGHT_W, TOOLBAR_H, METRICS_BAR_H,
     SITE_MARGIN, GRID_SIZE, DEFAULT_WEIGHTS,
     ROOM_COLORS, ROOM_BORDERS,
+    FURNITURE_ITEMS, FURNITURE_COLORS, FURNITURE_BORDERS,
 )
 from hotel import Hotel
 from packing import pack_rooms_into_hotel, pack_bushes
@@ -93,6 +95,8 @@ CONSTRAINT_OPTIONS = ["All rooms", "Bedrooms only", "Public rooms only"]
 
 # minimum room dimension when resizing
 MIN_ROOM_DIM = 60
+# minimum dimension for furniture / landscape / bush resize
+MIN_ITEM_DIM = 10
 # handle size in px
 HANDLE_R = 6
 # max undo steps
@@ -120,6 +124,12 @@ class HotelApp:
         self._undo_stack: list = []
         self._redo_stack: list = []
 
+        # ── placed furniture (persists across Regenerate) ──
+        self.placed_furniture:     list  = []   # [{type,x,y,w,h}, …]
+        self.selected_furniture:   int   = -1   # index into placed_furniture, -1=none
+        self._furniture_drag_start = None        # (idx, mx, my)
+        self._spawning_furniture   = None        # furniture item being dragged from library
+
         # ── interaction state ──
         self.selected_room         = None
         self._drag_start           = None   # (room, mx, my) for move
@@ -129,9 +139,13 @@ class HotelApp:
         self._preview_id           = None
         self._spawning_room        = None   # room being dragged from library
         self._snap_on              = True
-        self._bush_drag            = None   # (index, ox, oy)
+        self.selected_landscape    = -1     # index into landscape_items
+        self.selected_bush         = -1     # index into bushes
+        self._landscape_drag_start = None   # (idx, mx, my)
+        self._bush_drag_start      = None   # (idx, mx, my)
         self._library_press_root   = None   # (x_root, y_root) for click vs drag
         self._room_preview         = None   # (label, rw, rh) while previewing
+        self._ghost_window         = None   # floating drag-ghost Toplevel
 
         # ── tk vars ──
         self.mode          = tk.StringVar(value="random")
@@ -284,6 +298,31 @@ class HotelApp:
             tk.Label(row, text=chip_lbl, font=("Helvetica", 9),
                      bg=C["panel"], fg=C["text_dim"]).pack(side="left")
 
+        self._hsep(f)
+        self._sec(f, "FURNITURE  (drag to place)")
+        tk.Label(f, text="Right-click room to pin/unpin",
+                 font=("Helvetica", 7), bg=C["panel"],
+                 fg=C["text_dim"], anchor="w").pack(fill="x", padx=12)
+        for fname, finfo in FURNITURE_ITEMS.items():
+            fcol    = FURNITURE_COLORS[fname]
+            fborder = FURNITURE_BORDERS[fname]
+            row = tk.Frame(f, bg=C["panel"], cursor="hand2")
+            row.pack(fill="x", padx=12, pady=2)
+            chip = tk.Frame(row, bg=fcol, width=20, height=12,
+                            highlightthickness=1,
+                            highlightbackground=fborder,
+                            cursor="hand2")
+            chip.pack(side="left", padx=(0, 7))
+            name_lbl = tk.Label(row, text=fname, font=("Helvetica", 9),
+                                bg=C["panel"], fg=C["text"], cursor="hand2")
+            name_lbl.pack(side="left")
+            for w in (chip, name_lbl, row):
+                w.bind("<ButtonPress-1>",
+                       lambda e, n=fname, info=finfo:
+                           self._flib_press(e, n, info))
+                w.bind("<B1-Motion>",    self._flib_drag)
+                w.bind("<ButtonRelease-1>", self._flib_release)
+
     # right sidebar -----------------------------------------------
 
     def _build_right(self, parent):
@@ -380,6 +419,8 @@ class HotelApp:
         cv.bind("<Button-1>",        self._on_click)
         cv.bind("<B1-Motion>",       self._on_drag)
         cv.bind("<ButtonRelease-1>", self._on_release)
+        cv.bind("<Button-2>",        self._on_right_click)   # macOS two-finger / middle
+        cv.bind("<Button-3>",        self._on_right_click)   # right-click
         cv.bind("<Configure>",
                 lambda e: self._redraw() if self.hotel.rooms else None)
 
@@ -447,13 +488,82 @@ class HotelApp:
     def _snapped(self, v):
         return snap_to_grid(v, GRID_SIZE) if self._snap_on else int(v)
 
-    def _handle_pos(self, room):
-        """Bottom-right corner of selected room."""
-        return room.x + room.w, room.y + room.h
+    # ── four-corner resize helpers ────────────────────────────────────────────
 
-    def _near_handle(self, mx, my, room) -> bool:
-        hx, hy = self._handle_pos(room)
-        return abs(mx-hx) <= HANDLE_R+4 and abs(my-hy) <= HANDLE_R+4
+    @staticmethod
+    def _corner_positions(x, y, w, h) -> dict:
+        """Return {corner_name: (cx, cy)} for all four corners."""
+        return {
+            "TL": (x,     y),
+            "TR": (x + w, y),
+            "BL": (x,     y + h),
+            "BR": (x + w, y + h),
+        }
+
+    def _nearest_corner(self, mx, my, x, y, w, h):
+        """Return the corner name within HANDLE_R+4 px of (mx,my), or None."""
+        threshold = HANDLE_R + 4
+        for name, (cx, cy) in self._corner_positions(x, y, w, h).items():
+            if abs(mx - cx) <= threshold and abs(my - cy) <= threshold:
+                return name
+        return None
+
+    def _obj_xywh(self, obj):
+        """Return (x, y, w, h) for a room or furniture dict."""
+        if isinstance(obj, dict):
+            return obj["x"], obj["y"], obj["w"], obj["h"]
+        return obj.x, obj.y, obj.w, obj.h
+
+    def _apply_corner_resize(self, obj, corner, orig, mx, my,
+                             min_dim=None):
+        """
+        Resize from orig=(ox,oy,ow,oh,mx0,my0) using given corner.
+        min_dim: floor for width/height.  Defaults to MIN_ROOM_DIM for
+        Room objects, MIN_ITEM_DIM for furniture/landscape/bushes.
+        Returns new (x, y, w, h).
+        """
+        from rooms import Room as _Room
+        if min_dim is None:
+            min_dim = MIN_ROOM_DIM if isinstance(obj, _Room) else MIN_ITEM_DIM
+        ox, oy, ow, oh, mx0, my0 = orig
+        ddx = self._snapped(mx - mx0)
+        ddy = self._snapped(my - my0)
+
+        if corner == "BR":
+            nx, ny = ox, oy
+            nw = max(min_dim, ow + ddx)
+            nh = max(min_dim, oh + ddy)
+        elif corner == "BL":
+            nw = max(min_dim, ow - ddx)
+            nh = max(min_dim, oh + ddy)
+            nx = ox + ow - nw
+            ny = oy
+        elif corner == "TR":
+            nw = max(min_dim, ow + ddx)
+            nh = max(min_dim, oh - ddy)
+            nx = ox
+            ny = oy + oh - nh
+        else:   # TL
+            nw = max(min_dim, ow - ddx)
+            nh = max(min_dim, oh - ddy)
+            nx = ox + ow - nw
+            ny = oy + oh - nh
+
+        # clamp within site
+        sx, sy, sw, sh = self._site()
+        nx = clamp(nx, sx, sx + sw - nw)
+        ny = clamp(ny, sy, sy + sh - nh)
+        nw = min(nw, sx + sw - nx)
+        nh = min(nh, sy + sh - ny)
+        return int(nx), int(ny), int(nw), int(nh)
+
+    def _draw_corner_handles(self, x, y, w, h):
+        """Draw four filled circles at each corner of the bounding box."""
+        r = HANDLE_R
+        cv = self._canvas
+        for cx, cy in self._corner_positions(x, y, w, h).values():
+            cv.create_oval(cx - r, cy - r, cx + r, cy + r,
+                           fill=C["handle"], outline="white", width=1.5)
 
     def _clamp_to_site(self, room):
         """Push room back inside site boundaries."""
@@ -466,7 +576,8 @@ class HotelApp:
     # ------------------------------------------------------------------------
 
     def _push_undo(self):
-        self._undo_stack.append(self.hotel.snapshot())
+        self._undo_stack.append(
+            (self.hotel.snapshot(), copy.deepcopy(self.placed_furniture)))
         if len(self._undo_stack) > MAX_UNDO:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
@@ -474,18 +585,26 @@ class HotelApp:
     def _undo(self, *_):
         if not self._undo_stack:
             return
-        self._redo_stack.append(self.hotel.snapshot())
-        self.hotel.restore(self._undo_stack.pop())
-        self.selected_room = None
+        self._redo_stack.append(
+            (self.hotel.snapshot(), copy.deepcopy(self.placed_furniture)))
+        hotel_snap, furniture_snap = self._undo_stack.pop()
+        self.hotel.restore(hotel_snap)
+        self.placed_furniture = furniture_snap
+        self.selected_room     = None
+        self.selected_furniture = -1
         self._update_metrics()
         self._redraw()
 
     def _redo(self, *_):
         if not self._redo_stack:
             return
-        self._undo_stack.append(self.hotel.snapshot())
-        self.hotel.restore(self._redo_stack.pop())
-        self.selected_room = None
+        self._undo_stack.append(
+            (self.hotel.snapshot(), copy.deepcopy(self.placed_furniture)))
+        hotel_snap, furniture_snap = self._redo_stack.pop()
+        self.hotel.restore(hotel_snap)
+        self.placed_furniture = furniture_snap
+        self.selected_room     = None
+        self.selected_furniture = -1
         self._update_metrics()
         self._redraw()
 
@@ -543,10 +662,13 @@ class HotelApp:
         pad = self._llm_settings.get("pad") if getattr(self, "_llm_weights_active", False) else None
         n_bushes = self._llm_settings.get("n_bushes") if getattr(self, "_llm_weights_active", False) else None
 
+        # Collect pinned rooms before replacing the hotel
+        pinned_rooms = [r for r in self.hotel.rooms if getattr(r, "pinned", False)]
+
         self._push_undo()
         self.hotel = pack_rooms_into_hotel(
             site,
-            n_rooms=self._n_rooms_var.get(),
+            n_rooms=max(0, self._n_rooms_var.get() - len(pinned_rooms)),
             weights=self.weights,
             seed=self.seed,
             constraint=self._get_constraint(),
@@ -554,9 +676,14 @@ class HotelApp:
             zone_weights=llm_zone_weights,
             pad=pad,
         )
+        # Re-add pinned rooms so they persist across generation
+        for r in pinned_rooms:
+            self.hotel.add_room(r)
+
         self.bushes = (pack_bushes(site, self.hotel, seed=self.seed, n_bushes=n_bushes)
                        if self._show_bushes.get() else [])
         self.selected_room = None
+        self.selected_furniture = -1
         self._update_sel_label()
         self._redraw()
         self._update_metrics()
@@ -627,18 +754,43 @@ class HotelApp:
             hotel=self.hotel,
             bushes=self.bushes,
             landscape_items=self.landscape_items,
+            placed_furniture=self.placed_furniture,
             show_grid=self._show_grid.get(),
             show_labels=self._show_labels.get(),
             selected_room=self.selected_room,
             zone_rects=self._zone_rects if self.mode.get()=="zone" else None,
+            selected_furniture_idx=(self.selected_furniture
+                                    if self.selected_furniture >= 0 else None),
         )
-        # draw resize handle if a room is selected
+        cv = self._canvas
+        # Selected room — four corner handles
         if self.selected_room:
-            hx, hy = self._handle_pos(self.selected_room)
-            r = HANDLE_R
-            self._canvas.create_oval(
-                hx-r, hy-r, hx+r, hy+r,
-                fill=C["handle"], outline="white", width=1.5)
+            rm = self.selected_room
+            self._draw_corner_handles(rm.x, rm.y, rm.w, rm.h)
+
+        # Selected furniture — orange dashed border + four corner handles
+        if 0 <= self.selected_furniture < len(self.placed_furniture):
+            f = self.placed_furniture[self.selected_furniture]
+            self._draw_corner_handles(f["x"], f["y"], f["w"], f["h"])
+
+        # Selected landscape item — dashed selection rect + four corner handles
+        if 0 <= self.selected_landscape < len(self.landscape_items):
+            li = self.landscape_items[self.selected_landscape]
+            pad = 3
+            cv.create_rectangle(
+                li["x"]-pad, li["y"]-pad,
+                li["x"]+li["w"]+pad, li["y"]+li["h"]+pad,
+                outline=C["handle"], width=2, fill="", dash=(5, 3))
+            self._draw_corner_handles(li["x"], li["y"], li["w"], li["h"])
+
+        # Selected bush (tree) — dashed circle + corner handles on bounding box
+        if 0 <= self.selected_bush < len(self.bushes):
+            bx, by, br = self.bushes[self.selected_bush]
+            pad = 4
+            cv.create_oval(
+                bx-br-pad, by-br-pad, bx+br+pad, by+br+pad,
+                outline=C["handle"], width=2, fill="", dash=(5, 3))
+            self._draw_corner_handles(bx-br, by-br, 2*br, 2*br)
 
     def _update_metrics(self):
         m = self.hotel.compute_metrics(self._site())
@@ -650,8 +802,26 @@ class HotelApp:
     def _update_sel_label(self):
         if self.selected_room:
             r = self.selected_room
+            pin_tag = "  [PINNED]" if getattr(r, "pinned", False) else ""
             self._sel_lbl.config(
-                text=f"{r.label}\n{r.w}x{r.h} px  @({r.x},{r.y})",
+                text=f"{r.label}{pin_tag}\n{r.w}x{r.h} px  @({r.x},{r.y})",
+                fg=C["text"])
+        elif 0 <= self.selected_furniture < len(self.placed_furniture):
+            f = self.placed_furniture[self.selected_furniture]
+            self._sel_lbl.config(
+                text=f"{f['type']} (furniture)\n"
+                     f"{f['w']}x{f['h']} px  @({f['x']},{f['y']})",
+                fg=C["text"])
+        elif 0 <= self.selected_landscape < len(self.landscape_items):
+            li = self.landscape_items[self.selected_landscape]
+            self._sel_lbl.config(
+                text=f"{li['type'].capitalize()}\n"
+                     f"{li['w']}x{li['h']} px  @({li['x']},{li['y']})",
+                fg=C["text"])
+        elif 0 <= self.selected_bush < len(self.bushes):
+            bx, by, br = self.bushes[self.selected_bush]
+            self._sel_lbl.config(
+                text=f"Tree  r={br} px\n@({bx},{by})",
                 fg=C["text"])
         else:
             self._sel_lbl.config(text="None", fg=C["text_dim"])
@@ -712,70 +882,205 @@ class HotelApp:
     #  Library drag-to-canvas
     # ------------------------------------------------------------------------
 
+    # ── ghost-window helpers ─────────────────────────────────────────────────
+
+    def _start_drag_ghost(self, x_root, y_root, gw, gh, color, label):
+        """Spawn a small floating Toplevel that follows the cursor."""
+        try:
+            ghost = tk.Toplevel(self.root)
+            ghost.overrideredirect(True)
+            ghost.attributes("-topmost", True)
+            ghost.attributes("-alpha", 0.70)
+            ghost.geometry(f"{gw}x{gh}+{x_root - gw//2}+{y_root - gh//2}")
+            frame = tk.Frame(ghost, bg=color, highlightthickness=1,
+                             highlightbackground="#888888")
+            frame.pack(fill="both", expand=True)
+            short = label[:3] if len(label) > 3 else label
+            tk.Label(frame, text=short, bg=color, fg="#333333",
+                     font=("Helvetica", 7)).pack(expand=True)
+            self._ghost_window = ghost
+            self._ghost_gw = gw
+            self._ghost_gh = gh
+        except Exception:
+            self._ghost_window = None
+
+    def _move_drag_ghost(self, x_root, y_root):
+        if self._ghost_window:
+            try:
+                gw = getattr(self, "_ghost_gw", 60)
+                gh = getattr(self, "_ghost_gh", 36)
+                self._ghost_window.geometry(
+                    f"+{x_root - gw//2}+{y_root - gh//2}")
+            except Exception:
+                pass
+
+    def _destroy_drag_ghost(self):
+        if self._ghost_window:
+            try:
+                self._ghost_window.destroy()
+            except Exception:
+                pass
+            self._ghost_window = None
+
+    # ── library drag (room types) ─────────────────────────────────────────────
+
     def _library_press(self, event, label: str):
-        """Record press position; spawn ghost room for drag-to-canvas."""
+        """Record press; show ghost window. Room is created when cursor enters canvas."""
         self._library_press_root = (event.x_root, event.y_root)
+        self._library_drag_label = label
         self.mode.set("drag")
         self._on_mode_change()
-        from config import (A_SIZES,B_SIZES,C_SIZES,D_SIZES,
-                            T1_SIZES,T2_SIZES,LIB_SIZES,RR_SIZES)
+        from config import (A_SIZES, B_SIZES, C_SIZES, D_SIZES,
+                            T1_SIZES, T2_SIZES, LIB_SIZES, RR_SIZES)
         size_map = {
-            "BedroomA":A_SIZES,"BedroomB":B_SIZES,
-            "BedroomC":C_SIZES,"BedroomD":D_SIZES,
-            "TeaRoom1":T1_SIZES,"TeaRoom2":T2_SIZES,
-            "Library":LIB_SIZES,"ReadingRoom":RR_SIZES,
+            "BedroomA": A_SIZES, "BedroomB": B_SIZES,
+            "BedroomC": C_SIZES, "BedroomD": D_SIZES,
+            "TeaRoom1": T1_SIZES, "TeaRoom2": T2_SIZES,
+            "Library":  LIB_SIZES, "ReadingRoom": RR_SIZES,
         }
         rw, rh = size_map[label][0]
-        cx = self._canvas.winfo_rootx()
-        cy = self._canvas.winfo_rooty()
-        mx = event.x_root - cx
-        my = event.y_root - cy
-        sx, sy = self._snapped(mx - rw/2), self._snapped(my - rh/2)
-        room = ROOM_CLASSES[label](sx, sy, rw, rh)
-        self._spawning_room = room
-        self._push_undo()
-        self.hotel.add_room(room)
-        self.selected_room = room
-        self._drag_start = (room, mx, my)
-        self._redraw()
+        self._library_drag_size = (rw, rh)
+        self._spawning_room = None
+        color = ROOM_COLORS.get(label, "#EBF3FB")
+        gw = min(80, max(40, rw // 2))
+        gh = min(50, max(25, rh // 2))
+        self._start_drag_ghost(event.x_root, event.y_root, gw, gh, color, label)
 
     def _library_drag(self, event):
-        if not self._spawning_room:
-            return
+        self._move_drag_ghost(event.x_root, event.y_root)
         cx = self._canvas.winfo_rootx()
         cy = self._canvas.winfo_rooty()
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
         mx = event.x_root - cx
         my = event.y_root - cy
-        room, ox, oy = self._drag_start
-        dx = self._snapped(mx - ox)
-        dy = self._snapped(my - oy)
-        room.move(dx, dy)
-        self._drag_start = (room, mx, my)
-        self._redraw()
+        rw, rh = self._library_drag_size
+        label = self._library_drag_label
+        if 0 <= mx <= cw and 0 <= my <= ch:
+            if self._spawning_room is None:
+                # Cursor just entered canvas — create the room here
+                sx = self._snapped(mx - rw / 2)
+                sy = self._snapped(my - rh / 2)
+                room = ROOM_CLASSES[label](sx, sy, rw, rh)
+                room.pinned = True          # library-placed rooms are pinned
+                self._spawning_room = room
+                self._push_undo()
+                self.hotel.add_room(room)
+                self.selected_room = room
+                self._drag_start = (room, mx, my)
+            else:
+                room, ox, oy = self._drag_start
+                dx = self._snapped(mx - ox)
+                dy = self._snapped(my - oy)
+                room.move(dx, dy)
+                self._drag_start = (room, mx, my)
+            self._redraw()
 
     def _library_release(self, event):
+        self._destroy_drag_ghost()
+        label = getattr(self, "_library_drag_label", None)
+
+        # Detect click (barely moved) regardless of whether room was spawned.
+        # The cursor may never have crossed into the canvas, so _spawning_room
+        # can still be None on a plain click.
+        if self._library_press_root and label:
+            px, py = self._library_press_root
+            dist = math.hypot(event.x_root - px, event.y_root - py)
+            if dist < 5:
+                # plain click → undo any partially-spawned room, show preview
+                if self._spawning_room:
+                    self.hotel.remove_room(self._spawning_room)
+                    if self._undo_stack:
+                        self._undo_stack.pop()
+                self._spawning_room = None
+                self._drag_start = None
+                self._library_press_root = None
+                self._show_room_preview(label)
+                return
+
         if self._spawning_room:
-            # detect click (barely moved) vs actual drag
+            self._clamp_to_site(self._spawning_room)
+            self._update_metrics()
+        self._spawning_room = None
+        self._drag_start = None
+        self._library_press_root = None
+        self._redraw()
+
+    # ── furniture library drag ─────────────────────────────────────────────────
+
+    def _flib_press(self, event, fname: str, finfo: dict):
+        """Press on a furniture item in the library."""
+        self._library_press_root = (event.x_root, event.y_root)
+        self._flib_name = fname
+        self._flib_size = (finfo["w"], finfo["h"])
+        self._spawning_furniture = None
+        color = FURNITURE_COLORS.get(fname, "#D4C5A9")
+        gw = min(70, max(36, finfo["w"]))
+        gh = min(50, max(24, finfo["h"]))
+        self._start_drag_ghost(event.x_root, event.y_root, gw, gh, color, fname)
+
+    def _flib_drag(self, event):
+        self._move_drag_ghost(event.x_root, event.y_root)
+        cx = self._canvas.winfo_rootx()
+        cy = self._canvas.winfo_rooty()
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+        mx = event.x_root - cx
+        my = event.y_root - cy
+        fw, fh = self._flib_size
+        if 0 <= mx <= cw and 0 <= my <= ch:
+            if self._spawning_furniture is None:
+                # First entry into canvas — create the furniture item
+                fx = self._snapped(mx - fw / 2)
+                fy = self._snapped(my - fh / 2)
+                item = {"type": self._flib_name,
+                        "x": fx, "y": fy, "w": fw, "h": fh}
+                self._push_undo()
+                self.placed_furniture.append(item)
+                self._spawning_furniture = item
+                self.selected_furniture = len(self.placed_furniture) - 1
+                self._furniture_drag_start = (self.selected_furniture, mx, my)
+            else:
+                idx, ox, oy = self._furniture_drag_start
+                item = self.placed_furniture[idx]
+                item["x"] += self._snapped(mx - ox)
+                item["y"] += self._snapped(my - oy)
+                self._furniture_drag_start = (idx, mx, my)
+            self._redraw()
+
+    def _flib_release(self, event):
+        self._destroy_drag_ghost()
+        if self._spawning_furniture is not None:
             if self._library_press_root:
                 px, py = self._library_press_root
                 dist = math.hypot(event.x_root - px, event.y_root - py)
                 if dist < 5:
-                    # treat as a click -> undo the add and show room preview
-                    label = self._spawning_room.label
-                    self.hotel.remove_room(self._spawning_room)
+                    # plain click — remove item
                     if self._undo_stack:
                         self._undo_stack.pop()
-                    self._spawning_room = None
-                    self._drag_start = None
+                    if self.placed_furniture and \
+                            self.placed_furniture[-1] is self._spawning_furniture:
+                        self.placed_furniture.pop()
+                    self.selected_furniture = -1
+                    self._spawning_furniture = None
+                    self._furniture_drag_start = None
                     self._library_press_root = None
-                    self._show_room_preview(label)
+                    self._redraw()
                     return
-            self._clamp_to_site(self._spawning_room)
-            self._spawning_room = None
-            self._drag_start = None
+            # Clamp furniture to site
+            sx, sy, sw, sh = self._site()
+            item = self._spawning_furniture
+            item["x"] = max(sx, min(item["x"], sx + sw - item["w"]))
+            item["y"] = max(sy, min(item["y"], sy + sh - item["h"]))
+            self._spawning_furniture = None
+            self._furniture_drag_start = None
             self._library_press_root = None
-            self._update_metrics()
+            self._update_sel_label()
             self._redraw()
+        else:
+            self._spawning_furniture = None
+            self._furniture_drag_start = None
+            self._library_press_root = None
 
     # ------------------------------------------------------------------------
     #  Canvas mouse handlers
@@ -792,19 +1097,98 @@ class HotelApp:
             self._exit_room_preview()
             return
 
-        # Bush drag - works in all modes
-        for i, (bx, by, br) in enumerate(self.bushes):
-            if math.hypot(mx - bx, my - by) <= br:
-                self._bush_drag = (i, mx, my)
+        # ── Corner resize handles (check selected-item handles first) ─────────
+        # Furniture handles
+        if 0 <= self.selected_furniture < len(self.placed_furniture):
+            f = self.placed_furniture[self.selected_furniture]
+            corner = self._nearest_corner(mx, my, f["x"], f["y"], f["w"], f["h"])
+            if corner:
+                self._push_undo()
+                self._resize_start = ("furn", self.selected_furniture, corner,
+                                      f["x"], f["y"], f["w"], f["h"], mx, my)
                 return
 
-        if mode in ("random", "drag"):
-            # check resize handle first
-            if (self.selected_room and
-                    self._near_handle(mx, my, self.selected_room)):
-                r = self.selected_room
-                self._resize_start = (r, r.w, r.h, mx, my)
+        # Landscape handles (bench / path)
+        if 0 <= self.selected_landscape < len(self.landscape_items):
+            li = self.landscape_items[self.selected_landscape]
+            corner = self._nearest_corner(mx, my,
+                                          li["x"], li["y"], li["w"], li["h"])
+            if corner:
+                self._push_undo()
+                self._resize_start = ("landscape", self.selected_landscape,
+                                      corner,
+                                      li["x"], li["y"], li["w"], li["h"],
+                                      mx, my)
                 return
+
+        # Bush handles (4 corners of bounding box)
+        if 0 <= self.selected_bush < len(self.bushes):
+            bx, by, br = self.bushes[self.selected_bush]
+            corner = self._nearest_corner(mx, my, bx-br, by-br, 2*br, 2*br)
+            if corner:
+                self._push_undo()
+                self._resize_start = ("bush", self.selected_bush, corner,
+                                      bx-br, by-br, 2*br, 2*br, mx, my)
+                return
+
+        # Room handles
+        if self.selected_room and mode in ("random", "drag"):
+            r = self.selected_room
+            corner = self._nearest_corner(mx, my, r.x, r.y, r.w, r.h)
+            if corner:
+                self._push_undo()
+                self._resize_start = ("room", r, corner,
+                                      r.x, r.y, r.w, r.h, mx, my)
+                return
+
+        # ── Body hit-tests (select & start drag) ─────────────────────────────
+        # Furniture (top layer)
+        for i in range(len(self.placed_furniture) - 1, -1, -1):
+            f = self.placed_furniture[i]
+            if f["x"] <= mx <= f["x"]+f["w"] and f["y"] <= my <= f["y"]+f["h"]:
+                self._push_undo()
+                self.selected_furniture    = i
+                self.selected_room         = None
+                self.selected_landscape    = -1
+                self.selected_bush         = -1
+                self._furniture_drag_start = (i, mx, my)
+                self._update_sel_label()
+                self._redraw()
+                return
+
+        # Landscape items (bench / path)
+        for i in range(len(self.landscape_items) - 1, -1, -1):
+            li = self.landscape_items[i]
+            if (li["x"] <= mx <= li["x"]+li["w"] and
+                    li["y"] <= my <= li["y"]+li["h"]):
+                self._push_undo()
+                self.selected_landscape    = i
+                self.selected_furniture    = -1
+                self.selected_room         = None
+                self.selected_bush         = -1
+                self._landscape_drag_start = (i, mx, my)
+                self._update_sel_label()
+                self._redraw()
+                return
+
+        # Bushes (trees)
+        for i, (bx, by, br) in enumerate(self.bushes):
+            if math.hypot(mx - bx, my - by) <= br:
+                self.selected_bush         = i
+                self.selected_furniture    = -1
+                self.selected_room         = None
+                self.selected_landscape    = -1
+                self._bush_drag_start      = (i, mx, my)
+                self._update_sel_label()
+                self._redraw()
+                return
+
+        # Deselect landscape / bush / furniture if nothing above was hit
+        self.selected_furniture = -1
+        self.selected_landscape = -1
+        self.selected_bush      = -1
+
+        if mode in ("random", "drag"):
             hit = self._renderer.hit_test(mx, my, self.hotel)
             if hit is not self.selected_room:
                 self.selected_room = hit
@@ -826,26 +1210,72 @@ class HotelApp:
         mx, my = event.x, event.y
         mode   = self.mode.get()
 
-        # Bush drag - takes priority
-        if self._bush_drag is not None:
-            i, ox, oy = self._bush_drag
-            bx, by, br = self.bushes[i]
-            self.bushes[i] = (bx + mx - ox, by + my - oy, br)
-            self._bush_drag = (i, mx, my)
-            self._redraw()
+        # Furniture drag
+        if self._furniture_drag_start is not None:
+            idx, ox, oy = self._furniture_drag_start
+            if 0 <= idx < len(self.placed_furniture):
+                f = self.placed_furniture[idx]
+                f["x"] += self._snapped(mx - ox)
+                f["y"] += self._snapped(my - oy)
+                self._furniture_drag_start = (idx, mx, my)
+                self._update_sel_label()
+                self._redraw()
             return
 
-        # resize takes priority
+        # Landscape item drag (bench / path)
+        if self._landscape_drag_start is not None:
+            idx, ox, oy = self._landscape_drag_start
+            if 0 <= idx < len(self.landscape_items):
+                li = self.landscape_items[idx]
+                li["x"] += self._snapped(mx - ox)
+                li["y"] += self._snapped(my - oy)
+                self._landscape_drag_start = (idx, mx, my)
+                self._update_sel_label()
+                self._redraw()
+            return
+
+        # Bush (tree) drag
+        if self._bush_drag_start is not None:
+            idx, ox, oy = self._bush_drag_start
+            if 0 <= idx < len(self.bushes):
+                bx, by, br = self.bushes[idx]
+                self.bushes[idx] = (bx + mx - ox, by + my - oy, br)
+                self._bush_drag_start = (idx, mx, my)
+                self._redraw()
+            return
+
+        # Corner resize (all item types)
         if self._resize_start:
-            room, ow, oh, ox, oy = self._resize_start
-            new_w = max(MIN_ROOM_DIM, self._snapped(ow + (mx - ox)))
-            new_h = max(MIN_ROOM_DIM, self._snapped(oh + (my - oy)))
-            # clamp to site
-            sx, sy, sw, sh = self._site()
-            new_w = min(new_w, sx+sw - room.x)
-            new_h = min(new_h, sy+sh - room.y)
-            room.w = new_w
-            room.h = new_h
+            rs = self._resize_start
+            kind = rs[0]
+            if kind == "room":
+                _, room, corner, ox, oy, ow, oh, mx0, my0 = rs
+                nx, ny, nw, nh = self._apply_corner_resize(
+                    room, corner, (ox, oy, ow, oh, mx0, my0), mx, my)
+                room.x, room.y, room.w, room.h = nx, ny, nw, nh
+            elif kind == "furn":
+                _, fidx, corner, ox, oy, ow, oh, mx0, my0 = rs
+                if 0 <= fidx < len(self.placed_furniture):
+                    f = self.placed_furniture[fidx]
+                    nx, ny, nw, nh = self._apply_corner_resize(
+                        None, corner, (ox, oy, ow, oh, mx0, my0), mx, my)
+                    f["x"], f["y"], f["w"], f["h"] = nx, ny, nw, nh
+            elif kind == "landscape":
+                _, lidx, corner, ox, oy, ow, oh, mx0, my0 = rs
+                if 0 <= lidx < len(self.landscape_items):
+                    li = self.landscape_items[lidx]
+                    nx, ny, nw, nh = self._apply_corner_resize(
+                        None, corner, (ox, oy, ow, oh, mx0, my0), mx, my)
+                    li["x"], li["y"], li["w"], li["h"] = nx, ny, nw, nh
+                    if li["type"] == "bench":
+                        li["orient"] = "h" if nw >= nh else "v"
+            elif kind == "bush":
+                _, bidx, corner, ox, oy, ow, oh, mx0, my0 = rs
+                if 0 <= bidx < len(self.bushes):
+                    nx, ny, nw, nh = self._apply_corner_resize(
+                        None, corner, (ox, oy, ow, oh, mx0, my0), mx, my)
+                    new_br = max(8, (nw + nh) // 4)
+                    self.bushes[bidx] = (nx + nw//2, ny + nh//2, new_br)
             self._update_sel_label()
             self._redraw()
             return
@@ -888,8 +1318,36 @@ class HotelApp:
         mx, my = event.x, event.y
         mode   = self.mode.get()
 
-        if self._bush_drag is not None:
-            self._bush_drag = None
+        sx, sy, sw, sh = self._site()
+
+        # Furniture drag finalise
+        if self._furniture_drag_start is not None:
+            idx = self._furniture_drag_start[0]
+            if 0 <= idx < len(self.placed_furniture):
+                f = self.placed_furniture[idx]
+                f["x"] = max(sx, min(f["x"], sx + sw - f["w"]))
+                f["y"] = max(sy, min(f["y"], sy + sh - f["h"]))
+            self._furniture_drag_start = None
+            self._update_sel_label()
+            self._redraw()
+            return
+
+        # Landscape drag finalise
+        if self._landscape_drag_start is not None:
+            idx = self._landscape_drag_start[0]
+            if 0 <= idx < len(self.landscape_items):
+                li = self.landscape_items[idx]
+                li["x"] = max(sx, min(li["x"], sx + sw - li["w"]))
+                li["y"] = max(sy, min(li["y"], sy + sh - li["h"]))
+            self._landscape_drag_start = None
+            self._update_sel_label()
+            self._redraw()
+            return
+
+        # Bush drag finalise
+        if self._bush_drag_start is not None:
+            self._bush_drag_start = None
+            self._redraw()
             return
 
         if self._preview_id:
@@ -933,6 +1391,27 @@ class HotelApp:
         self._redraw()
 
     def _delete_selected(self, event=None):
+        if 0 <= self.selected_furniture < len(self.placed_furniture):
+            self._push_undo()
+            self.placed_furniture.pop(self.selected_furniture)
+            self.selected_furniture = -1
+            self._update_sel_label()
+            self._redraw()
+            return
+        if 0 <= self.selected_landscape < len(self.landscape_items):
+            self._push_undo()
+            self.landscape_items.pop(self.selected_landscape)
+            self.selected_landscape = -1
+            self._update_sel_label()
+            self._redraw()
+            return
+        if 0 <= self.selected_bush < len(self.bushes):
+            self._push_undo()
+            self.bushes.pop(self.selected_bush)
+            self.selected_bush = -1
+            self._update_sel_label()
+            self._redraw()
+            return
         if self.selected_room:
             self._push_undo()
             self.hotel.remove_room(self.selected_room)
@@ -941,15 +1420,28 @@ class HotelApp:
             self._update_metrics()
             self._redraw()
 
+    def _on_right_click(self, event):
+        """Right-click on a room toggles its pinned state."""
+        mx, my = event.x, event.y
+        hit = self._renderer.hit_test(mx, my, self.hotel)
+        if hit:
+            self._push_undo()
+            hit.pinned = not hit.pinned
+            self.selected_room = hit
+            self._update_sel_label()
+            self._redraw()
+
     # ------------------------------------------------------------------------
     #  Toolbar callbacks
     # ------------------------------------------------------------------------
 
     def _on_mode_change(self):
-        self._zone_start   = None
-        self._path_start   = None
-        self._drag_start   = None
-        self._resize_start = None
+        self._zone_start          = None
+        self._path_start          = None
+        self._drag_start          = None
+        self._resize_start        = None
+        self._landscape_drag_start = None
+        self._bush_drag_start     = None
         # don't clear zone_rects when leaving zone mode - user keeps them
         cursors = {"random":"fleur","drag":"hand2","zone":"crosshair",
                    "bench":"crosshair","path":"crosshair","llm":"arrow"}
@@ -999,10 +1491,11 @@ class HotelApp:
         if not path:
             return
         data = {
-            "seed":            self.seed,
-            "hotel":           self.hotel.to_dict(),
-            "landscape_items": self.landscape_items,
-            "zone_rects":      self._zone_rects,
+            "seed":             self.seed,
+            "hotel":            self.hotel.to_dict(),
+            "landscape_items":  self.landscape_items,
+            "placed_furniture": self.placed_furniture,
+            "zone_rects":       self._zone_rects,
         }
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
@@ -1020,9 +1513,10 @@ class HotelApp:
             self._push_undo()
             self.seed = data.get("seed", self.seed)
             self._seed_lbl.config(text=f"seed  {self.seed}")
-            self.hotel           = Hotel.from_dict(data["hotel"])
-            self.landscape_items = data.get("landscape_items", [])
-            self._zone_rects     = data.get("zone_rects", [])
+            self.hotel            = Hotel.from_dict(data["hotel"])
+            self.landscape_items  = data.get("landscape_items", [])
+            self.placed_furniture = data.get("placed_furniture", [])
+            self._zone_rects      = data.get("zone_rects", [])
             self.selected_room   = None
             self._update_sel_label()
             self._update_metrics()

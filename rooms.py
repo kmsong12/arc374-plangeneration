@@ -17,6 +17,8 @@ class Room:
     w: int
     h: int
     label: str = "Room"
+    pinned: bool = False   # True → preserved across Regenerate
+    furniture: list = field(default_factory=list)  # room-relative [{type,x,y,w,h}]
 
     def as_tuple(self) -> Tuple[int, int, int, int]:
         return (self.x, self.y, self.w, self.h)

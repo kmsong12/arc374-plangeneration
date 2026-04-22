@@ -4,6 +4,7 @@ Includes JSON serialisation for save/load.
 """
 
 from __future__ import annotations
+import copy
 import json
 from typing import List, Tuple, Dict, Optional
 from rooms import Room, ROOM_CLASSES
@@ -70,7 +71,8 @@ class Hotel:
 
     def to_dict(self) -> dict:
         return {"rooms": [
-            {"label": r.label, "x": r.x, "y": r.y, "w": r.w, "h": r.h}
+            {"label": r.label, "x": r.x, "y": r.y, "w": r.w, "h": r.h,
+             "pinned": r.pinned}
             for r in self.rooms
         ]}
 
@@ -80,7 +82,8 @@ class Hotel:
         for d in data.get("rooms", []):
             room_cls = ROOM_CLASSES.get(d["label"])
             if room_cls:
-                h.add_room(room_cls(d["x"], d["y"], d["w"], d["h"]))
+                h.add_room(room_cls(d["x"], d["y"], d["w"], d["h"],
+                                    pinned=d.get("pinned", False)))
         return h
 
     def save_json(self, path: str):
@@ -97,7 +100,7 @@ class Hotel:
     def snapshot(self) -> list:
         """Return a deep copy of room list for undo."""
         return [
-            ROOM_CLASSES[r.label](r.x, r.y, r.w, r.h)
+            ROOM_CLASSES[r.label](r.x, r.y, r.w, r.h, pinned=r.pinned)
             for r in self.rooms
         ]
 

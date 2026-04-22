@@ -510,6 +510,66 @@ def _draw_bench(c, x, y, w, h, orient="h"):
             _line(c, x+2,      y+h*0.05+h*0.90*i/4,
                      x+w*0.30-2,y+h*0.05+h*0.90*i/4, fill=leg)
 
+def _draw_furniture_item(c, item, selected=False):
+    """Draw a single furniture item on the canvas."""
+    from config import FURNITURE_COLORS, FURNITURE_BORDERS
+    t = item["type"]
+    x, y, w, h = item["x"], item["y"], item["w"], item["h"]
+    fill   = FURNITURE_COLORS.get(t,  "#D4C5A9")
+    border = FURNITURE_BORDERS.get(t, "#8B7355")
+
+    if t == "Plant":
+        cx2, cy2 = x + w // 2, y + h // 2
+        r = min(w, h) // 2
+        c.create_oval(cx2 - r, cy2 - r, cx2 + r, cy2 + r,
+                      fill="#7BC67E", outline="#388E3C", width=1.5)
+        r2 = int(r * 0.6)
+        c.create_oval(cx2 - r2, cy2 - r, cx2 + r2, cy2,
+                      fill="#4CAF50", outline="#388E3C", width=1)
+    elif t == "Table":
+        _rect(c, x, y, w, h, fill=fill, outline=border, width=1.5)
+        leg = 5
+        for lx2, ly2 in ((x, y), (x + w - leg, y),
+                          (x, y + h - leg), (x + w - leg, y + h - leg)):
+            _rect(c, lx2, ly2, leg, leg, fill=border, outline="")
+    elif t == "Chair":
+        _rect(c, x, y, w, h, fill=fill, outline=border, width=1.5)
+        back_h = max(6, h // 4)
+        _rect(c, x, y, w, back_h, fill=border, outline="")
+    elif t == "Sofa":
+        _rect(c, x, y, w, h, fill=fill, outline=border, width=1.5)
+        arm = max(6, w // 7)
+        _rect(c, x,         y, arm, h, fill=border, outline="")
+        _rect(c, x + w - arm, y, arm, h, fill=border, outline="")
+        back_h = max(6, h // 4)
+        _rect(c, x, y, w, back_h, fill=border, outline="")
+    elif t == "Bed":
+        _rect(c, x, y, w, h, fill=fill, outline=border, width=1.5)
+        head_h = max(8, h // 6)
+        _rect(c, x, y, w, head_h, fill=border, outline="")
+        pw = w // 2
+        ph = max(10, h // 6)
+        _rect(c, x + (w - pw) // 2, y + head_h + 4, pw, ph,
+              fill="#FFFFFF", outline=border, width=1)
+    elif t == "Wardrobe":
+        _rect(c, x, y, w, h, fill=fill, outline=border, width=1.5)
+        _line(c, x + w // 2, y + 4, x + w // 2, y + h - 4,
+              fill=border, width=1)
+        hy2 = y + h // 2
+        _oval_center(c, x + w // 4,     hy2, 3, 3, fill=border, outline="")
+        _oval_center(c, x + 3 * w // 4, hy2, 3, 3, fill=border, outline="")
+    else:
+        _rect(c, x, y, w, h, fill=fill, outline=border, width=1.5)
+
+    if selected:
+        pad = 3
+        c.create_rectangle(x - pad, y - pad, x + w + pad, y + h + pad,
+                            outline="#E85D24", width=2, fill="", dash=(4, 3))
+    # type label below
+    c.create_text(x + w // 2, y + h + 8, text=t,
+                  font=("Helvetica", 6), fill="#888880")
+
+
 def _draw_path(c, x, y, w, h):
     _rect(c, x, y, w, h, fill="#D4CCBA", outline="#B0A898", width=1)
     if w>=h:
@@ -531,8 +591,10 @@ class CanvasRenderer:
         self.canvas = canvas
 
     def draw(self, site, hotel, bushes,
-             landscape_items=None, show_grid=True, show_labels=False,
-             selected_room=None, zone_rects=None):
+             landscape_items=None, placed_furniture=None,
+             show_grid=True, show_labels=False,
+             selected_room=None, zone_rects=None,
+             selected_furniture_idx=None):
         c=self.canvas; c.delete("all")
         sx,sy,sw,sh=site
         cw=c.winfo_width() or 2000; ch=c.winfo_height() or 2000
@@ -567,6 +629,12 @@ class CanvasRenderer:
         for room in hotel.rooms:
             self._draw_room(room, selected=(room is selected_room),
                             show_label=show_labels)
+
+        # Furniture items drawn on top of rooms so they're always visible
+        if placed_furniture:
+            for i, item in enumerate(placed_furniture):
+                _draw_furniture_item(c, item,
+                                     selected=(i == selected_furniture_idx))
 
     def draw_preview(self, label: str, base_w: int, base_h: int):
         """Draw a single room centred on the canvas with no other elements."""
@@ -616,12 +684,19 @@ class CanvasRenderer:
         c=self.canvas; lbl=room.label
         fill_col=ROOM_COLORS.get(lbl,"#F0EEE8")
         line_col=ROOM_BORDERS.get(lbl,"#888")
+        border_w = 2.5 if getattr(room, "pinned", False) else 1.5
         c.create_rectangle(room.x,room.y,room.x+room.w,room.y+room.h,
-                           fill=fill_col,outline=line_col,width=1.5)
+                           fill=fill_col,outline=line_col,width=border_w)
         try:
             self._draw_interior(room)
         except Exception:
             pass
+        # Pin indicator: small filled circle in top-right corner
+        if getattr(room, "pinned", False):
+            px = room.x + room.w - 8
+            py = room.y + 8
+            c.create_oval(px - 6, py - 6, px + 6, py + 6,
+                          fill="#E85D24", outline="white", width=1.5)
         if selected:
             pad=4
             c.create_rectangle(room.x-pad,room.y-pad,

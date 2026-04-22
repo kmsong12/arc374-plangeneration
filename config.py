@@ -74,3 +74,29 @@ SIDEBAR_LEFT_W  = 192
 SIDEBAR_RIGHT_W = 215
 TOOLBAR_H       = 40
 METRICS_BAR_H   = 28
+
+# Furniture items (drag from library) --------------------------------
+FURNITURE_ITEMS = {
+    "Table":    {"w": 60,  "h": 80},
+    "Chair":    {"w": 32,  "h": 32},
+    "Sofa":     {"w": 90,  "h": 45},
+    "Bed":      {"w": 80,  "h": 100},
+    "Wardrobe": {"w": 55,  "h": 80},
+    "Plant":    {"w": 28,  "h": 28},
+}
+FURNITURE_COLORS = {
+    "Table":    "#D4C5A9",
+    "Chair":    "#C4B5A0",
+    "Sofa":     "#B8A898",
+    "Bed":      "#E8E0D8",
+    "Wardrobe": "#C8B898",
+    "Plant":    "#7BC67E",
+}
+FURNITURE_BORDERS = {
+    "Table":    "#8B7355",
+    "Chair":    "#7A6248",
+    "Sofa":     "#7A6248",
+    "Bed":      "#888888",
+    "Wardrobe": "#8B7355",
+    "Plant":    "#388E3C",
+}
