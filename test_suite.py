@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 # Ensure project root is on the path ---------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from config import DEFAULT_WEIGHTS
+from config import DEFAULT_WEIGHTS, N_ROOMS_DEFAULT
 from geometry_utils import (
     clamp,
     overlaps_any,
@@ -756,6 +756,15 @@ class TestFindApiKey(unittest.TestCase):
                 os.environ["ANTHROPIC_API_KEY"] = env_backup
 
 
+class TestFindOpenAiKey(unittest.TestCase):
+    """Tests for llm_bridge._find_openai_api_key."""
+
+    def test_returns_env_var_when_set(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-openai-env"}):
+            with patch("llm_bridge.os.path.isfile", return_value=False):
+                result = _bridge._find_openai_api_key()
+        self.assertEqual(result, "sk-openai-env")
+
 class TestPromptToSettings(unittest.TestCase):
     """Tests for llm_bridge.prompt_to_settings."""
 
@@ -774,13 +783,21 @@ class TestPromptToSettings(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 _bridge.prompt_to_settings("mostly bedrooms")
 
-    def test_falls_back_to_default_weights_on_bad_json(self):
-        """When the API returns non-JSON, prompt_to_settings returns DEFAULT_WEIGHTS."""
+    def test_falls_back_on_bad_json_uses_heuristic_fallback(self):
+        """Non-JSON LLM response → heuristic neutral weights (1.0), not literal DEFAULT_WEIGHTS."""
         mock_client = self._mock_api_response("this is not json at all")
         with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = _bridge.prompt_to_settings("anything")
-        self.assertEqual(result["weights"], DEFAULT_WEIGHTS)
+        self.assertEqual(result["weights"]["BedroomA"], 1.0)
+        self.assertEqual(result.get("n_rooms"), N_ROOMS_DEFAULT)
+
+    def test_heuristic_parses_room_count_on_api_failure(self):
+        mock_client = self._mock_api_response("not json {")
+        with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            result = _bridge.prompt_to_settings("Please make 5 rooms")
+        self.assertEqual(result.get("n_rooms"), 5)
 
     def test_parses_valid_weights_response(self):
         weights_json = json.dumps({"weights": {
@@ -823,7 +840,7 @@ class TestPromptToSettings(unittest.TestCase):
         with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = _bridge.prompt_to_settings("test")
-        self.assertLessEqual(result["n_rooms"], 24)
+        self.assertLessEqual(result["n_rooms"], 40)
 
     def test_optional_pad_clamped(self):
         data = json.dumps({"weights": DEFAULT_WEIGHTS, "pad": 999})
@@ -831,7 +848,7 @@ class TestPromptToSettings(unittest.TestCase):
         with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = _bridge.prompt_to_settings("test")
-        self.assertLessEqual(result["pad"], 80)
+        self.assertLessEqual(result["pad"], 120)
 
     # edge cases
     def test_empty_prompt_still_returns_weights(self):
@@ -848,7 +865,7 @@ class TestPromptToSettings(unittest.TestCase):
         with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = _bridge.prompt_to_settings("test")
-        self.assertNotIn("spatial", result)
+        self.assertEqual(result.get("spatial"), "mixed")
 
     def test_valid_spatial_value_included(self):
         data = json.dumps({"weights": DEFAULT_WEIGHTS, "spatial": "bedrooms_top"})
@@ -857,6 +874,167 @@ class TestPromptToSettings(unittest.TestCase):
              patch("anthropic.Anthropic", return_value=mock_client):
             result = _bridge.prompt_to_settings("test")
         self.assertEqual(result.get("spatial"), "bedrooms_top")
+
+    def test_bedrooms_only_infers_enabled_roomtypes_when_api_omits(self):
+        """NL \"bedrooms only\" should set enabled_roomtypes even if JSON has no key."""
+        weights_json = json.dumps({"weights": DEFAULT_WEIGHTS})
+        mock_client = self._mock_api_response(weights_json)
+        with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            result = _bridge.prompt_to_settings("bedrooms only, 8 rooms")
+        self.assertEqual(result.get("enabled_roomtypes"), ["bedroom"])
+        self.assertEqual(result["weights"]["TeaRoom1"], 0.0)
+
+
+class TestCoerceRichSettings(unittest.TestCase):
+    """Exercise extended ``llm_bridge._coerce_settings`` keys."""
+
+    def test_preserves_clustering_roomtype_ent(self):
+        d = {
+            "weights": DEFAULT_WEIGHTS,
+            "clustering": 0.7,
+            "roomtype_weights": {"bedroom": 2.0, "public room": 0.5},
+            "entropy": 2.0,
+            "layout_style": "corridor",
+            "min_center_distance": 40.0,
+            "orientation_goal": "inward_collaborative",
+        }
+        r = _bridge._coerce_settings(d)
+        self.assertEqual(r["clustering"], 0.7)
+        self.assertEqual(r["roomtype_weights"]["bedroom"], 2.0)
+        self.assertEqual(r["entropy"], 2.0)
+        self.assertEqual(r["layout_style"], "corridor")
+        self.assertEqual(r["min_center_distance"], 40.0)
+        self.assertEqual(r["orientation_goal"], "inward_collaborative")
+
+    def test_invalid_layout_style_dropped(self):
+        r = _bridge._coerce_settings({
+            "weights": DEFAULT_WEIGHTS,
+            "layout_style": "not_a_mode",
+        })
+        self.assertNotIn("layout_style", r)
+
+    def test_zones_normalized_coerces(self):
+        r = _bridge._coerce_settings({
+            "weights": DEFAULT_WEIGHTS,
+            "zones_normalized": [
+                {"x": 0, "y": 0, "w": 0.4, "h": 0.4},
+            ],
+        })
+        self.assertEqual(len(r["zones_normalized"]), 1)
+        self.assertEqual(len(r["zones_specs"]), 1)
+
+    def test_enabled_roomtypes_masks_weights_and_spatial(self):
+        r = _bridge._coerce_settings({
+            "weights": DEFAULT_WEIGHTS,
+            "enabled_roomtypes": ["bedroom"],
+            "spatial": "bedrooms_top",
+        })
+        self.assertEqual(r["enabled_roomtypes"], ["bedroom"])
+        self.assertEqual(r["weights"]["TeaRoom1"], 0.0)
+        self.assertGreater(r["weights"]["BedroomA"], 0.0)
+        self.assertEqual(r["spatial"], "mixed")
+
+
+class TestMergePromptRoomtypes(unittest.TestCase):
+    """``_merge_prompt_roomtypes``: NL inference when API omits enabled types."""
+
+    def test_bedrooms_only_masks_public_labels(self):
+        raw = {"weights": DEFAULT_WEIGHTS}
+        base = _bridge._coerce_settings(raw)
+        m = _bridge._merge_prompt_roomtypes(
+            "bedrooms only layout", raw, base)
+        self.assertEqual(m.get("enabled_roomtypes"), ["bedroom"])
+        self.assertEqual(m["weights"]["Library"], 0.0)
+        self.assertGreater(m["weights"]["BedroomA"], 0.0)
+
+    def test_api_explicit_enabled_skips_inference(self):
+        raw = {
+            "weights": DEFAULT_WEIGHTS,
+            "enabled_roomtypes": ["public room"],
+        }
+        base = _bridge._coerce_settings(raw)
+        m = _bridge._merge_prompt_roomtypes(
+            "only bedrooms please", raw, base)
+        self.assertEqual(m.get("enabled_roomtypes"), ["public room"])
+
+
+class TestPackFromLlmEnabledRoomtypes(unittest.TestCase):
+    """``pack_from_llm_settings`` honors enabled room categories."""
+
+    def test_only_bedrooms_places_no_public(self):
+        from model.room_library import get_library
+
+        library = get_library()
+        site = (0, 0, 800, 600)
+        settings = {
+            "weights": dict(DEFAULT_WEIGHTS),
+            "n_rooms": 10,
+            "enabled_roomtypes": ["bedroom"],
+        }
+        from packing import pack_from_llm_settings
+
+        plan = pack_from_llm_settings(library, site, settings, seed=123)
+        self.assertGreater(len(plan.rooms), 0)
+        for ri in plan.rooms:
+            self.assertEqual(ri.template_snapshot.roomtype, "bedroom")
+
+
+class TestDemoNlSettings(unittest.TestCase):
+    """Local demo parser (no API)."""
+
+    def test_greenery_heavy_sw_bedrooms(self):
+        raw = _bridge._demo_nl_to_settings(
+            "greenery heavy with bedrooms only in the southwest corner")
+        r = _bridge._coerce_settings(raw)
+        self.assertGreaterEqual(r.get("n_bushes", 0), 75)
+        self.assertEqual(r.get("enabled_roomtypes"), ["bedroom"])
+        zn = r.get("zones_normalized") or []
+        self.assertGreaterEqual(len(zn), 1)
+        self.assertLess(zn[0][0], 0.3)
+
+
+class TestPromptToSettingsDemoFlag(unittest.TestCase):
+    def test_demo_skips_api(self):
+        with patch.object(_bridge, "_anthropic_messages_to_settings") as m:
+            r = _bridge.prompt_to_settings(
+                "greenery heavy bedrooms only sw corner", demo=True)
+        m.assert_not_called()
+        self.assertGreaterEqual(r.get("n_bushes", 0), 70)
+
+
+class TestPromptToSettingsOpenAI(unittest.TestCase):
+    """Tests for prompt_to_settings with provider=\"openai\"."""
+
+    def test_raises_runtime_error_when_no_openai_key(self):
+        with patch.object(_bridge, "_find_openai_api_key", return_value=""):
+            with self.assertRaises(RuntimeError):
+                _bridge.prompt_to_settings("mostly bedrooms", provider="openai")
+
+    def test_unknown_provider_falls_back_to_anthropic_path(self):
+        """Invalid provider names use the Anthropic code path."""
+        weights_json = json.dumps({"weights": DEFAULT_WEIGHTS.copy()})
+        mock_content = MagicMock()
+        mock_content.text = weights_json
+        mock_message = MagicMock()
+        mock_message.content = [mock_content]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_message
+        with patch.object(_bridge, "_find_api_key", return_value="sk-ant-fake"), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            result = _bridge.prompt_to_settings("x", provider="bogus")
+        self.assertIn("weights", result)
+
+    def test_openai_invokes_chat_helper_without_packaging_openai(self):
+        """OpenAI path works when _openai_chat_to_settings is mocked (no SDK import)."""
+        out = {
+            "weights": {**DEFAULT_WEIGHTS, "BedroomA": 3.0},
+        }
+        with patch.object(_bridge, "_openai_chat_to_settings", return_value=out), \
+             patch.object(_bridge, "_find_openai_api_key", return_value="sk-openai-fake"):
+            result = _bridge.prompt_to_settings("mostly bedrooms", provider="openai")
+        self.assertEqual(result["weights"]["BedroomA"], 3.0)
+        self.assertEqual(result["weights"]["Library"], DEFAULT_WEIGHTS["Library"])
 
 
 # ------------------------------------------------------------------------

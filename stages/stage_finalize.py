@@ -22,10 +22,16 @@ import tkinter.colorchooser
 import tkinter.filedialog
 import tkinter.simpledialog
 from tkinter import messagebox
-from typing import Optional
+from typing import Any, List, Optional, Tuple
 
 from canvas_renderer import PlanCanvasRenderer
 from config import SIDEBAR_LEFT_W, SIDEBAR_RIGHT_W, SITE_MARGIN, CANVAS_W, CANVAS_H
+
+from stages.stage_generate import (
+    bind_plan_canvas_autoresize,
+    make_scrollable_plan_canvas,
+    update_plan_canvas_scrollregion,
+)
 from geometry_utils import (
     polygon_bbox, polygon_overlaps_any, polygons_overlap_sat, rect_to_polygon,
     translate_polygon,
@@ -71,9 +77,13 @@ class FinalizeStage(tk.Frame):
         self._drag_bush_start: Optional[tuple] = None       # (orig_x, orig_y)
         self._drag_bush_offset: Optional[tuple] = None      # (dx, dy)
 
+        self._undo_stack: List[Any] = []  # Plan snapshots via plan.snapshot()
+        self._undo_drag_anchor: Optional[Any] = None
+
         self._build_layout()
         self._install_toolbar()
         self.renderer = PlanCanvasRenderer(self._canvas)
+        bind_plan_canvas_autoresize(self._canvas, self._redraw)
         self.after(30, self._redraw)
 
     def teardown(self):
@@ -97,12 +107,8 @@ class FinalizeStage(tk.Frame):
         left.grid_propagate(False)
         self._build_left(left)
 
-        cwrap = tk.Frame(self, bg=C["bg"])
-        cwrap.grid(row=0, column=1, sticky="nsew")
-        self._canvas = tk.Canvas(cwrap, bg=C["bg"],
-                                 highlightthickness=1,
-                                 highlightbackground=C["panel_bdr"])
-        self._canvas.pack(fill="both", expand=True, padx=8, pady=8)
+        cwrap, self._canvas = make_scrollable_plan_canvas(self)
+        cwrap.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
         self._canvas.bind("<Button-1>", self._on_down)
         self._canvas.bind("<B1-Motion>", self._on_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_up)
@@ -114,6 +120,12 @@ class FinalizeStage(tk.Frame):
         right.grid(row=0, column=2, sticky="ns")
         right.grid_propagate(False)
         self._build_right(right)
+
+    def _cw_xy(self, event) -> Tuple[float, float]:
+        """Canvas pixel coordinates → world / site px (fit-to-view inverse)."""
+        cx = float(self._canvas.canvasx(event.x))
+        cy = float(self._canvas.canvasy(event.y))
+        return self.renderer.screen_to_world(cx, cy)
 
     def _build_left(self, parent):
         tk.Label(parent, text="Saved Plans", font=("Helvetica", 11, "bold"),
@@ -170,6 +182,9 @@ class FinalizeStage(tk.Frame):
         label_button(tl, "Clear All", self._clear_all).pack(side="left", padx=3)
         label_button(tl, "Clear Landscape",
                      self._clear_landscape).pack(side="left", padx=3)
+        self._undo_btn = label_button(tl, "Undo", self._undo)
+        self._undo_btn.pack(side="left", padx=3)
+        self._sync_undo_btn()
 
         label_button(tr, "Save to Library", self._save_plan,
                      primary=True).pack(side="right", padx=3)
@@ -177,6 +192,33 @@ class FinalizeStage(tk.Frame):
                      self._export_json).pack(side="right", padx=3)
         label_button(tr, "Export PNG",
                      self._export_png).pack(side="right", padx=3)
+
+    def _undo(self) -> None:
+        if not self._undo_stack:
+            return
+        snap = self._undo_stack.pop()
+        self.plan.restore(snap)
+        self.selected = None
+        self._clear_landscape_selection()
+        self._sync_undo_btn()
+        self._redraw()
+        self._update_metrics()
+        self._update_selection_info()
+        self.shell.set_status("Undid last change.")
+
+    def _sync_undo_btn(self) -> None:
+        en = bool(self._undo_stack)
+        fg = C["accent"] if en else C["text_dim"]
+        try:
+            self._undo_btn.config(fg=fg, cursor=("hand2" if en else "arrow"))
+        except Exception:
+            pass
+
+    def _push_undo_capture(self, snap: Any) -> None:
+        self._undo_stack.append(snap)
+        while len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+        self._sync_undo_btn()
 
     # ------------------------------------------------------------------
     # Plan list
@@ -218,6 +260,8 @@ class FinalizeStage(tk.Frame):
         if not self.plan.site:
             self.plan.site = _make_site()
         self.selected = None
+        self._undo_stack.clear()
+        self._sync_undo_btn()
         self._redraw()
         self._update_metrics()
 
@@ -260,17 +304,19 @@ class FinalizeStage(tk.Frame):
         self._drag_bush_offset = None
 
     def _on_down(self, event):
+        cx, cy = self._cw_xy(event)
         if self._armed_landscape is not None:
-            self._place_landscape(event.x, event.y)
+            self._place_landscape(cx, cy)
             return
-        hit = self.plan.room_at(event.x, event.y)
+        hit = self.plan.room_at(cx, cy)
         if hit is not None:
             self.selected = hit
             self._clear_landscape_selection()
             if not hit.pinned:
+                self._undo_drag_anchor = self.plan.snapshot()
                 self._drag_start = (hit.x, hit.y)
                 bx, by, _, _ = hit.world_bbox()
-                self._drag_offset = (event.x - bx, event.y - by)
+                self._drag_offset = (cx - bx, cy - by)
             else:
                 self._drag_start = None
                 self._drag_offset = None
@@ -279,7 +325,7 @@ class FinalizeStage(tk.Frame):
             return
 
         # No room hit -> try landscape items, then bushes
-        l_idx = self._hit_landscape(event.x, event.y)
+        l_idx = self._hit_landscape(cx, cy)
         if l_idx is not None:
             self.selected = None
             self._drag_start = None
@@ -288,12 +334,12 @@ class FinalizeStage(tk.Frame):
             self.selected_landscape = l_idx
             it = self.plan.landscape[l_idx]
             self._drag_landscape_start = (it["x"], it["y"])
-            self._drag_landscape_offset = (event.x - it["x"], event.y - it["y"])
+            self._drag_landscape_offset = (cx - it["x"], cy - it["y"])
             self._update_selection_info()
             self._redraw()
             return
 
-        b_idx = self._hit_bush(event.x, event.y)
+        b_idx = self._hit_bush(cx, cy)
         if b_idx is not None:
             self.selected = None
             self._drag_start = None
@@ -302,7 +348,7 @@ class FinalizeStage(tk.Frame):
             self.selected_bush = b_idx
             bx, by, _br = self.plan.bushes[b_idx]
             self._drag_bush_start = (bx, by)
-            self._drag_bush_offset = (event.x - bx, event.y - by)
+            self._drag_bush_offset = (cx - bx, cy - by)
             self._update_selection_info()
             self._redraw()
             return
@@ -316,11 +362,12 @@ class FinalizeStage(tk.Frame):
         self._redraw()
 
     def _on_drag(self, event):
+        cx, cy = self._cw_xy(event)
         # Room drag
         if self.selected is not None and self._drag_offset is not None:
             ox, oy = self._drag_offset
-            new_bx = event.x - ox
-            new_by = event.y - oy
+            new_bx = cx - ox
+            new_by = cy - oy
             bx0, by0, bw, bh = self.selected.world_bbox()
             dx = new_bx - bx0
             dy = new_by - by0
@@ -333,8 +380,8 @@ class FinalizeStage(tk.Frame):
                 and self._drag_landscape_offset is not None):
             ox, oy = self._drag_landscape_offset
             it = self.plan.landscape[self.selected_landscape]
-            it["x"] = event.x - ox
-            it["y"] = event.y - oy
+            it["x"] = cx - ox
+            it["y"] = cy - oy
             self._redraw()
             return
         # Bush drag
@@ -343,13 +390,15 @@ class FinalizeStage(tk.Frame):
             ox, oy = self._drag_bush_offset
             bx_old, by_old, br = self.plan.bushes[self.selected_bush]
             self.plan.bushes[self.selected_bush] = (
-                event.x - ox, event.y - oy, br)
+                cx - ox, cy - oy, br)
             self._redraw()
             return
 
     def _on_up(self, _event):
         # Room release
         if self.selected is not None and self._drag_start is not None:
+            sx0, sy0 = self._drag_start
+            drag_anchor = self._undo_drag_anchor
             if self._overlaps_other(self.selected):
                 self.selected.x, self.selected.y = self._drag_start
                 self.shell.set_status("Overlap detected — snapped back.")
@@ -358,6 +407,13 @@ class FinalizeStage(tk.Frame):
             if bx < sx or by < sy or bx + bw > sx + sw or by + bh > sy + sh:
                 self.selected.x, self.selected.y = self._drag_start
                 self.shell.set_status("Out of bounds — snapped back.")
+            if drag_anchor is not None:
+                moved = (
+                    abs(self.selected.x - sx0) > 1e-3
+                    or abs(self.selected.y - sy0) > 1e-3)
+                if moved:
+                    self._push_undo_capture(drag_anchor)
+            self._undo_drag_anchor = None
             self._drag_start = None
             self._drag_offset = None
             self._redraw()
@@ -386,26 +442,32 @@ class FinalizeStage(tk.Frame):
 
     def _on_delete(self, _event):
         if self.selected is not None:
+            snap = self.plan.snapshot()
             self.plan.remove_room(self.selected)
             self.selected = None
+            self._push_undo_capture(snap)
             self._update_selection_info()
             self._redraw()
             self._update_metrics()
             return
         if self.selected_landscape is not None:
+            snap = self.plan.snapshot()
             idx = self.selected_landscape
             if 0 <= idx < len(self.plan.landscape):
                 self.plan.landscape.pop(idx)
             self._clear_landscape_selection()
+            self._push_undo_capture(snap)
             self._update_selection_info()
             self._redraw()
             self._update_metrics()
             return
         if self.selected_bush is not None:
+            snap = self.plan.snapshot()
             idx = self.selected_bush
             if 0 <= idx < len(self.plan.bushes):
                 self.plan.bushes.pop(idx)
             self._clear_landscape_selection()
+            self._push_undo_capture(snap)
             self._update_selection_info()
             self._redraw()
             self._update_metrics()
@@ -416,6 +478,7 @@ class FinalizeStage(tk.Frame):
     def _rotate_selected(self):
         if self.selected is None:
             return
+        snap = self.plan.snapshot()
         before = (self.selected.rotation, self.selected.x, self.selected.y)
         self.selected.rotate_90()
         if self._overlaps_other(self.selected):
@@ -428,6 +491,7 @@ class FinalizeStage(tk.Frame):
             self.selected.rotation, self.selected.x, self.selected.y = before
             self.shell.set_status("Rotation would leave site — cancelled.")
             return
+        self._push_undo_capture(snap)
         self._redraw()
 
     def _recolor_selected(self):
@@ -474,12 +538,15 @@ class FinalizeStage(tk.Frame):
     # ------------------------------------------------------------------
 
     def _place_landscape(self, cx, cy):
+        snap = self.plan.snapshot()
         kind = self._armed_landscape
+        placed = False
         if kind == "tree":
             r = random.randint(8, 16)
             box = rect_to_polygon(cx - r * 2, cy - r * 2, 4 * r, 4 * r)
             if not self._overlaps_any_room_poly(box):
                 self.plan.bushes.append((cx, cy, r))
+                placed = True
             else:
                 self.shell.set_status("Overlaps a room — not placed.")
         else:
@@ -495,8 +562,11 @@ class FinalizeStage(tk.Frame):
                     "type": base, "x": cx - w / 2, "y": cy - h / 2,
                     "w": w, "h": h, "orient": orient,
                 })
+                placed = True
             else:
                 self.shell.set_status("Overlaps a room — not placed.")
+        if placed:
+            self._push_undo_capture(snap)
         self._redraw()
 
     def _overlaps_any_room_poly(self, poly) -> bool:
@@ -508,8 +578,14 @@ class FinalizeStage(tk.Frame):
     # ------------------------------------------------------------------
 
     def _clear_all(self):
+        if (
+                not self.plan.rooms and not self.plan.landscape
+                and not self.plan.bushes):
+            return
+        snap = self.plan.snapshot()
         self.plan.clear()
         self.selected = None
+        self._push_undo_capture(snap)
         self._redraw()
         self._update_metrics()
         self._update_selection_info()
@@ -558,7 +634,13 @@ class FinalizeStage(tk.Frame):
         if not path:
             return
         try:
-            self._canvas.postscript(file=path, colormode="color")
+            cw = self._canvas.winfo_width() or 1000
+            ch = self._canvas.winfo_height() or 640
+            self._canvas.postscript(
+                file=path,
+                colormode="color",
+                width=float(cw),
+                height=float(ch))
             self.shell.set_status(f"Wrote {path}. Convert to PNG via ImageMagick.")
         except Exception as e:
             messagebox.showerror("Export failed", str(e))
@@ -568,6 +650,7 @@ class FinalizeStage(tk.Frame):
     # ------------------------------------------------------------------
 
     def _redraw(self):
+        update_plan_canvas_scrollregion(self._canvas, self.plan.site)
         self.renderer.draw(
             self.plan, site=self.plan.site,
             show_grid=True, show_labels=False,

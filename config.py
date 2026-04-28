@@ -38,16 +38,25 @@ STEPBAR_H       = 42
 METRICS_BAR_H   = 28
 
 # --- Room author (Stage 1) -------------------------------------------------
-# Canvas pixels for the room template polygon stroke; must match
-# `RoomCanvasRenderer._draw_template_scaled` create_polygon width.
-ROOM_POLYGON_OUTLINE_PX = 2.0
+# Wall / door / window slab depth in **template world units** (feet-style
+# numbers; same as Door default ``h`` in ``furniture_lib``). Exterior
+# outline stroke uses ``room_polygon_outline_screen_px``. Interior ``Wall``
+# thickness is stored in the same units so snapping lines up at every zoom.
+AUTHOR_WALL_DEPTH_WORLD = 0.3
+
+# Legacy name: nominal stroke at scale 1 (used by imports / tests).
+ROOM_POLYGON_OUTLINE_PX = max(1.0, AUTHOR_WALL_DEPTH_WORLD * 1.0)
+
+
+def room_polygon_outline_screen_px(scale: float) -> float:
+    """Canvas stroke width in pixels matching ``AUTHOR_WALL_DEPTH_WORLD``."""
+    return max(1.0, AUTHOR_WALL_DEPTH_WORLD * max(float(scale), 1e-6))
 
 
 def room_outline_thickness_template(scale: float) -> float:
-    """Template-space thickness for an interior `Wall` so that
-    ``w.thickness * scale`` (screen px) matches `ROOM_POLYGON_OUTLINE_PX`
-    at the time the wall is created at the current zoom `scale`."""
-    return ROOM_POLYGON_OUTLINE_PX / max(float(scale), 1e-6)
+    """Interior wall slab thickness (template units), equal to Door depth."""
+    _ = scale  # fixed in world units; callers pass zoom for API compat
+    return AUTHOR_WALL_DEPTH_WORLD
 
 # --- Bushes ---------------------------------------------------------------
 N_BUSHES     = 30

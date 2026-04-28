@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from geometry_utils import (
-    polygon_bbox, rotate_polygon, translate_polygon,
+    polygon_bbox, polygon_centroid, rotate_polygon, translate_polygon,
 )
 from model.room_template import RoomTemplate, FurnitureItem
 
@@ -38,6 +38,21 @@ class RoomInstance:
     iid: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     # --- derived geometry ------------------------------------------------
+
+    def template_point_to_world(self, lx: float, ly: float) -> Tuple[float, float]:
+        """Template-local point → site coordinates (matches ``world_polygon``)."""
+        poly0 = self.template_snapshot.polygon
+        if not poly0:
+            return (lx + self.x, ly + self.y)
+        rot = float(self.rotation) % 360.0
+        if abs(rot) < 1e-6:
+            return (lx + self.x, ly + self.y)
+        ccx, ccy = polygon_centroid(poly0)
+        pr = rotate_polygon([(lx, ly)], rot, ccx, ccy)
+        rx, ry = pr[0]
+        rpoly = rotate_polygon(poly0, rot)
+        bx, by, _, _ = polygon_bbox(rpoly)
+        return (rx - bx + self.x, ry - by + self.y)
 
     def world_polygon(self) -> List[Tuple[float, float]]:
         """Return the room's polygon in world (site) coordinates."""

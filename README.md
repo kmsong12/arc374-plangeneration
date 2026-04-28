@@ -16,6 +16,15 @@ python main.py
 
 **Python 3.9+** required (Tkinter ships with Python).
 
+Optional LLM deps (Generation → LLM):
+
+```bash
+pip install anthropic   # Claude
+pip install openai      # ChatGPT-compatible API (default model: gpt-4o-mini)
+```
+
+Put API keys in a `.env` file next to `main.py` (see `.env.example`), or export `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
+
 > Pillow is only needed if you want PNG export via external conversion; the built-in export writes PostScript (`.ps`).
 
 ---
@@ -60,7 +69,7 @@ geometry_utils.py     – snap/rect helpers + polygon SAT / bbox / rotate / pt-i
 canvas_renderer.py    – RoomCanvasRenderer (Stage 1) + PlanCanvasRenderer (Stage 2/3)
 presets.py            – hand-drawn preset bedroom/tea/library renderers (8 rooms)
 packing.py            – dart-throw packer; random_pack, zone_pack, pack_bushes
-llm_bridge.py         – (kept) text-prompt → generation-settings helper
+llm_bridge.py         – text prompt → packing settings JSON (Anthropic or OpenAI)
 
 model/
   __init__.py
@@ -111,6 +120,5 @@ These files are created next to `main.py` on first launch.
 
 ## Out of scope (for now)
 
-- LLM backend wiring (prompts are captured but not executed).
 - Arcs in custom furniture (rect/square/circle/triangle/line only).
 - Multi-floor / stair circulation.

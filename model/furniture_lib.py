@@ -310,7 +310,7 @@ _register(_spec("TableSmall",  "Small Table",   "Seating", 2.0, 2.0, "#D4C5A9", 
 _register(_spec("TV",          "TV",            "Display", 4.0, 0.6, "#222222", _draw_tv))
 
 # --- Openings ---
-_register(_spec("Window",      "Window",        "Openings", 3.0, 0.5, "#E3ECF5", _draw_window))
+_register(_spec("Window",      "Window",        "Openings", 3.0, 0.3, "#E3ECF5", _draw_window))
 _register(_spec("Door",        "Door",          "Openings", 2.8, 0.3, "#B08968", _draw_door))
 
 # --- Bath ---

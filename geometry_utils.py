@@ -11,7 +11,7 @@ Polygon helpers (used by the final-modifications drag/snap-back):
 
 from __future__ import annotations
 import math
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 Point = Tuple[float, float]
 Polygon = Sequence[Point]
@@ -144,6 +144,27 @@ def point_in_polygon(p: Point, poly: Polygon) -> bool:
             inside = not inside
         j = i
     return inside
+
+
+def point_in_polygon_interior_lenient(
+        p: Point, poly: Polygon,
+        toward: Optional[Point] = None) -> bool:
+    """Strict ``point_in_polygon`` rejects points on edges and thickened-wall
+    corners that sit epsilon-outside after offset. Interior authoring uses a
+    small nudge toward ``toward`` (room centroid when ``None``) before giving up.
+    """
+    if len(poly) < 3:
+        return True
+    gx, gy = toward if toward is not None else polygon_centroid(poly)
+    px, py = float(p[0]), float(p[1])
+    if point_in_polygon((px, py), poly):
+        return True
+    for alpha in (0.05, 0.11, 0.22, 0.41, 0.65):
+        qx = px * (1.0 - alpha) + gx * alpha
+        qy = py * (1.0 - alpha) + gy * alpha
+        if point_in_polygon((qx, qy), poly):
+            return True
+    return False
 
 
 def _project(poly: Polygon, axis: Point) -> Tuple[float, float]:
@@ -401,12 +422,13 @@ def interior_wall_fully_inside_room(
     c2 = (ex + nx * half, ey + ny * half)
     c3 = (ex - nx * half, ey - ny * half)
     c4 = (sx - nx * half, sy - ny * half)
+    cc = polygon_centroid(poly)
     for p in (c1, c2, c3, c4):
-        if not point_in_polygon(p, poly):
+        if not point_in_polygon_interior_lenient(p, poly, cc):
             return False
     for t in (0.0, 0.25, 0.5, 0.75, 1.0):
         px = sx + t * (ex - sx)
         py = sy + t * (ey - sy)
-        if not point_in_polygon((px, py), poly):
+        if not point_in_polygon_interior_lenient((px, py), poly, cc):
             return False
     return True

@@ -14,7 +14,7 @@ from model.room_template import RoomTemplate, FurnitureItem, Wall
 from model.plan import Plan, RoomInstance
 from model import furniture_lib
 from presets import PRESET_RENDERERS
-from config import ROOM_POLYGON_OUTLINE_PX
+from config import room_polygon_outline_screen_px
 from geometry_utils import rotated_rect_corners
 from units import fmt_ft, fmt_ft2
 from rotated_canvas import RotatedCanvasProxy
@@ -379,7 +379,8 @@ class RoomCanvasRenderer:
              place_preview: Optional[Tuple] = None,
              wall_mode: bool = False,
              furniture_resize: Optional[int] = None,
-             opening_edge_glow: Optional[Tuple[int, bool]] = None) -> None:
+             opening_edge_glow:
+                 Optional[Tuple[Tuple[str, int], bool]] = None) -> None:
         c = self.canvas
         c.delete("all")
         cw, ch = self._canvas_size()
@@ -402,8 +403,8 @@ class RoomCanvasRenderer:
             furniture_resize=furniture_resize)
 
         if opening_edge_glow is not None:
-            ei, ok = opening_edge_glow
-            self._draw_opening_edge_glow(template, ei, ok)
+            glow_key, ok = opening_edge_glow
+            self._draw_opening_edge_glow(template, glow_key, ok)
 
         # Drag-ghost footprint (rendered above furniture, below handles).
         if drag_preview is not None:
@@ -512,18 +513,27 @@ class RoomCanvasRenderer:
                 gy += step
             gx += step
 
-    def _draw_opening_edge_glow(self, template: RoomTemplate,
-                                 edge_idx: int, valid: bool) -> None:
-        """Highlight a room polygon edge while placing a door or window."""
-        poly = template.polygon
-        n = len(poly)
-        if not (0 <= edge_idx < n):
-            return
-        ax, ay = poly[edge_idx]
-        bx, by = poly[(edge_idx + 1) % n]
+    def _draw_opening_edge_glow(
+            self, template: RoomTemplate,
+            glow_key: Tuple[str, int], valid: bool) -> None:
+        """Highlight a room polygon edge or interior wall while placing."""
+        col = "#00B4D8" if valid else "#C24141"
+        kind, ix = glow_key[0], glow_key[1]
+        if kind == "poly":
+            poly = template.polygon
+            n = len(poly)
+            if not (0 <= ix < n):
+                return
+            ax, ay = poly[ix]
+            bx, by = poly[(ix + 1) % n]
+        else:
+            walls = template.walls
+            if not (0 <= ix < len(walls)):
+                return
+            w = walls[ix]
+            ax, ay, bx, by = w.x0, w.y0, w.x1, w.y1
         acx, acy = self.world_to_canvas(ax, ay)
         bcx, bcy = self.world_to_canvas(bx, by)
-        col = "#00B4D8" if valid else "#C24141"
         self.canvas.create_line(
             acx, acy, bcx, bcy, fill=col, width=5,
             capstyle=tk.ROUND, joinstyle=tk.ROUND)
@@ -616,10 +626,11 @@ class RoomCanvasRenderer:
             cx, cy = self.world_to_canvas(x, y)
             pts += [cx, cy]
         if pts:
+            outline_w = room_polygon_outline_screen_px(self.scale)
             c.create_polygon(*pts,
                              fill=template.fill_color,
                              outline=template.border_color,
-                             width=ROOM_POLYGON_OUTLINE_PX)
+                             width=outline_w)
 
         # preset interior in scaled local space (only meaningful for preset_id)
         if template.preset_id:
@@ -688,10 +699,106 @@ class RoomCanvasRenderer:
 # ---------------------------------------------------------------------------
 
 class PlanCanvasRenderer:
-    """Draws the full site + plan."""
+    """Draws the full site + plan.
+
+    World coordinates (``plan.site``, room poses, etc.) are unchanged; the
+    canvas applies a uniform **view scale** so the site and content fit the
+    visible widget with padding (no 1:1 pixel assumption on screen).
+    """
+
+    _VIEW_PAD = 24.0
 
     def __init__(self, canvas: tk.Canvas):
         self.canvas = canvas
+        # Last draw viewport: world px -> screen px
+        self._plan_view_s: float = 1.0
+        self._plan_view_ox: float = 0.0
+        self._plan_view_oy: float = 0.0
+
+    def screen_to_world(self, sx: float, sy: float) -> Tuple[float, float]:
+        """Canvas pixel (after ``canvasx`` / ``canvasy``) → world / site px."""
+        s = self._plan_view_s
+        if abs(s) < 1e-12:
+            s = 1.0
+        return (
+            (sx - self._plan_view_ox) / s,
+            (sy - self._plan_view_oy) / s,
+        )
+
+    def _w2s(self, wx: float, wy: float) -> Tuple[float, float]:
+        return (
+            self._plan_view_ox + wx * self._plan_view_s,
+            self._plan_view_oy + wy * self._plan_view_s,
+        )
+
+    def _lw(self, w: float) -> float:
+        """Scale cosmetic line/outline width toward readability."""
+        return max(1.0, min(8.0, w * self._plan_view_s))
+
+    @staticmethod
+    def _world_content_bounds(
+            plan: Plan,
+            site: Tuple[int, int, int, int],
+            zone_preview: Optional[Tuple[int, int, int, int]],
+            ) -> Tuple[float, float, float, float]:
+        """Bounding box (minx, miny, maxx, maxy) in world pixels."""
+        sx, sy, sw, sh = site
+        minx = float(sx)
+        miny = float(sy)
+        maxx = float(sx + sw)
+        maxy = float(sy + sh)
+        for r in plan.rooms:
+            bx, by, bw, bh = r.world_bbox()
+            minx = min(minx, bx)
+            miny = min(miny, by)
+            maxx = max(maxx, bx + bw)
+            maxy = max(maxy, by + bh)
+        for zx, zy, zw, zh in plan.zones:
+            minx = min(minx, float(zx))
+            miny = min(miny, float(zy))
+            maxx = max(maxx, float(zx + zw))
+            maxy = max(maxy, float(zy + zh))
+        for item in plan.landscape:
+            ix = float(item["x"])
+            iy = float(item["y"])
+            iw = float(item["w"])
+            ih = float(item["h"])
+            minx = min(minx, ix)
+            miny = min(miny, iy)
+            maxx = max(maxx, ix + iw)
+            maxy = max(maxy, iy + ih)
+        for bx, by, br in plan.bushes:
+            r = float(br)
+            minx = min(minx, bx - r)
+            miny = min(miny, by - r)
+            maxx = max(maxx, bx + r)
+            maxy = max(maxy, by + r)
+        if zone_preview is not None:
+            zx0, zy0, zw0, zh0 = zone_preview
+            minx = min(minx, float(zx0))
+            miny = min(miny, float(zy0))
+            maxx = max(maxx, float(zx0 + zw0))
+            maxy = max(maxy, float(zy0 + zh0))
+        return (minx, miny, maxx, maxy)
+
+    def _setup_view(self, plan: Plan,
+                    site: Tuple[int, int, int, int],
+                    zone_preview: Optional[Tuple[int, int, int, int]],
+                    cw: int, ch: int) -> None:
+        minx, miny, maxx, maxy = self._world_content_bounds(
+            plan, site, zone_preview)
+        content_w = max(maxx - minx, 1.0)
+        content_h = max(maxy - miny, 1.0)
+        pad = self._VIEW_PAD
+        avail_w = max(50.0, float(cw) - 2.0 * pad)
+        avail_h = max(50.0, float(ch) - 2.0 * pad)
+        self._plan_view_s = min(avail_w / content_w, avail_h / content_h)
+        drawn_w = content_w * self._plan_view_s
+        drawn_h = content_h * self._plan_view_s
+        ox = pad + (avail_w - drawn_w) / 2.0
+        oy = pad + (avail_h - drawn_h) / 2.0
+        self._plan_view_ox = ox - minx * self._plan_view_s
+        self._plan_view_oy = oy - miny * self._plan_view_s
 
     def draw(self, plan: Plan,
              site: Optional[Tuple[int, int, int, int]] = None,
@@ -711,6 +818,8 @@ class PlanCanvasRenderer:
         if site is None:
             site = plan.site
         sx, sy, sw, sh = site
+        self._setup_view(plan, site, zone_preview, cw, ch)
+        vp = self._plan_view_s
 
         # Background
         c.create_rectangle(0, 0, cw, ch, fill="#E8E6DE", outline="")
@@ -719,20 +828,27 @@ class PlanCanvasRenderer:
             self._draw_site_grid(site)
 
         # Site border
-        c.create_rectangle(sx, sy, sx + sw, sy + sh,
-                           fill="#FAFAF6", outline="#1a1a1a", width=2)
+        x0, y0 = self._w2s(float(sx), float(sy))
+        x1, y1 = self._w2s(float(sx + sw), float(sy + sh))
+        c.create_rectangle(
+            min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1),
+            fill="#FAFAF6", outline="#1a1a1a",
+            width=self._lw(2.0))
 
         # Zones
         for i, (zx, zy, zw, zh) in enumerate(plan.zones):
             is_hl = (highlight_zone_idx == i)
+            zx0, zy0 = self._w2s(float(zx), float(zy))
+            zx1, zy1 = self._w2s(float(zx + zw), float(zy + zh))
             c.create_rectangle(
-                zx, zy, zx + zw, zy + zh,
+                min(zx0, zx1), min(zy0, zy1), max(zx0, zx1), max(zy0, zy1),
                 fill="#FFF3CD" if not is_hl else "#FFE49C",
                 outline="#BA7517",
-                width=2 if is_hl else 1,
+                width=self._lw(2.0 if is_hl else 1.0),
                 dash=(4, 3),
                 stipple="gray25")
-            c.create_text(zx + 6, zy + 6, anchor="nw",
+            tx, ty = self._w2s(float(zx) + 6.0, float(zy) + 6.0)
+            c.create_text(tx, ty, anchor="nw",
                           text=f"Zone {i + 1}",
                           font=("Helvetica", 8, "bold"),
                           fill="#8a5800")
@@ -740,11 +856,11 @@ class PlanCanvasRenderer:
         # Landscape: paths drawn below rooms
         for item in plan.landscape:
             if item["type"] == "path":
-                _draw_path(c, item["x"], item["y"], item["w"], item["h"])
+                self._draw_path_w(item["x"], item["y"], item["w"], item["h"])
 
         # Bushes
         for bx, by, br in plan.bushes:
-            _draw_bush(c, bx, by, br)
+            self._draw_bush_w(bx, by, br)
 
         # Rooms
         for room in plan.rooms:
@@ -754,8 +870,9 @@ class PlanCanvasRenderer:
         # Landscape: benches on top
         for item in plan.landscape:
             if item["type"] == "bench":
-                _draw_bench(c, item["x"], item["y"], item["w"], item["h"],
-                            item.get("orient", "h"))
+                self._draw_bench_w(
+                    item["x"], item["y"], item["w"], item["h"],
+                    item.get("orient", "h"))
 
         # Landscape selection highlight (rectangle)
         if (selected_landscape is not None
@@ -763,41 +880,84 @@ class PlanCanvasRenderer:
             it = plan.landscape[selected_landscape]
             lx = it["x"]; ly = it["y"]
             lw = it["w"]; lh = it["h"]
-            c.create_rectangle(lx - SEL_PAD, ly - SEL_PAD,
-                               lx + lw + SEL_PAD, ly + lh + SEL_PAD,
-                               outline=C_SELECT, width=SEL_WIDTH, fill="")
+            lx0, ly0 = self._w2s(lx - SEL_PAD, ly - SEL_PAD)
+            lx1, ly1 = self._w2s(lx + lw + SEL_PAD, ly + lh + SEL_PAD)
+            c.create_rectangle(
+                lx0, ly0, lx1, ly1,
+                outline=C_SELECT, width=self._lw(SEL_WIDTH), fill="")
 
         # Bush selection highlight (circle)
         if (selected_bush is not None
                 and 0 <= selected_bush < len(plan.bushes)):
             bx, by, br = plan.bushes[selected_bush]
-            pad_r = br + SEL_PAD
-            c.create_oval(bx - pad_r, by - pad_r, bx + pad_r, by + pad_r,
-                          outline=C_SELECT, width=SEL_WIDTH, fill="")
+            pad_r = (br + SEL_PAD) * vp
+            sx_c, sy_c = self._w2s(bx, by)
+            c.create_oval(sx_c - pad_r, sy_c - pad_r, sx_c + pad_r, sy_c + pad_r,
+                          outline=C_SELECT, width=self._lw(SEL_WIDTH), fill="")
 
         # Zone preview (currently dragging)
         if zone_preview:
             zx0, zy0, zw, zh = zone_preview
+            ax0, ay0 = self._w2s(float(zx0), float(zy0))
+            ax1, ay1 = self._w2s(float(zx0 + zw), float(zy0 + zh))
             c.create_rectangle(
-                zx0, zy0, zx0 + zw, zy0 + zh,
+                min(ax0, ax1), min(ay0, ay1), max(ax0, ax1), max(ay0, ay1),
                 outline="#BA7517", fill="#FFF3CD",
-                dash=(5, 3), stipple="gray25", width=1)
+                dash=(5, 3), stipple="gray25", width=self._lw(1.0))
 
         # Drop preview polygon (dragging a room from a library)
         if drop_preview_poly:
-            flat = _polygon_to_flat(drop_preview_poly)
-            fill = "#BEE8C2" if drop_preview_valid else "#F7C3C3"
-            border = "#2D9F6A" if drop_preview_valid else "#C44444"
-            c.create_polygon(*flat, fill=fill, outline=border,
-                             width=2, stipple="gray25")
+            fp0 = drop_preview_poly[0]
+            if isinstance(fp0, (list, tuple)) and len(fp0) >= 2:
+                flat_w = _polygon_to_flat(drop_preview_poly)
+            else:
+                flat_w = list(drop_preview_poly)
+            if len(flat_w) >= 4:
+                flat_out: List[float] = []
+                for i in range(0, len(flat_w), 2):
+                    wx = float(flat_w[i])
+                    wy = float(flat_w[i + 1])
+                    fx, fy = self._w2s(wx, wy)
+                    flat_out.extend((fx, fy))
+                fill = "#BEE8C2" if drop_preview_valid else "#F7C3C3"
+                border = "#2D9F6A" if drop_preview_valid else "#C44444"
+                c.create_polygon(*flat_out, fill=fill, outline=border,
+                                 width=self._lw(2.0), stipple="gray25")
 
-    def _draw_site_grid(self, site):
+    def _draw_site_grid(self, site: Tuple[int, int, int, int]) -> None:
         sx, sy, sw, sh = site
         c = self.canvas
-        for gy in range(sy, sy + sh + 1, GRID_SIZE):
-            for gx in range(sx, sx + sw + 1, GRID_SIZE):
-                c.create_oval(gx - 1, gy - 1, gx + 1, gy + 1,
-                              fill=C_SITE_GRID, outline="")
+        vp = self._plan_view_s
+        need = max(float(GRID_SIZE), 14.0 / max(vp, 1e-6))
+        step = int(GRID_SIZE * max(1, math.ceil(need / float(GRID_SIZE))))
+        rad = max(1.0, self._lw(1.0))
+        gx = int(math.floor(float(sx) / step) * step)
+        gx_max = sx + sw
+        gy_max = sy + sh
+        while gx <= gx_max:
+            gy = int(math.floor(float(sy) / step) * step)
+            while gy <= gy_max:
+                if sx <= gx <= gx_max and sy <= gy <= gy_max:
+                    cx, cy = self._w2s(float(gx), float(gy))
+                    c.create_oval(cx - rad, cy - rad, cx + rad, cy + rad,
+                                  fill=C_SITE_GRID, outline="")
+                gy += step
+            gx += step
+
+    def _draw_path_w(self, x: float, y: float, w: float, h: float) -> None:
+        x0, y0 = self._w2s(x, y)
+        x1, y1 = self._w2s(x + w, y + h)
+        _draw_path(self.canvas, x0, y0, x1 - x0, y1 - y0)
+
+    def _draw_bench_w(self, x: float, y: float, w: float, h: float,
+                      orient: str = "h") -> None:
+        x0, y0 = self._w2s(x, y)
+        x1, y1 = self._w2s(x + w, y + h)
+        _draw_bench(self.canvas, x0, y0, x1 - x0, y1 - y0, orient)
+
+    def _draw_bush_w(self, bx: float, by: float, br: float) -> None:
+        _draw_bush(self.canvas, self._w2s(bx, by)[0], self._w2s(bx, by)[1],
+                   br * self._plan_view_s)
 
     def _draw_room(self, room: RoomInstance, selected: bool, show_label: bool):
         c = self.canvas
@@ -805,33 +965,56 @@ class PlanCanvasRenderer:
         fill = room.fill_override or room.template_snapshot.fill_color
         border = room.template_snapshot.border_color
 
-        flat = _polygon_to_flat(poly)
+        flat = []
+        for px, py in poly:
+            flat.extend(self._w2s(float(px), float(py)))
+        vp = self._plan_view_s
         if flat:
-            c.create_polygon(*flat, fill=fill, outline=border,
-                             width=2.2 if room.pinned else 1.5)
+            c.create_polygon(
+                *flat, fill=fill, outline=border,
+                width=self._lw(2.2 if room.pinned else 1.5))
 
-        # Interior detail: preset renderers expect (x,y,w,h) and no rotation;
-        # draw the preset only if rotation is 0 (to avoid misalignment with
-        # rotated polygon).
         tpl = room.template_snapshot
-        if tpl.preset_id and room.rotation % 360 == 0:
+
+        rot_deg = float(room.rotation) % 360.0
+        if tpl.preset_id:
             bx, by, bw, bh = room.world_bbox()
+            sbx, sby = self._w2s(bx, by)
+            sw = bw * vp
+            sh = bh * vp
             renderer = PRESET_RENDERERS.get(tpl.preset_id)
             if renderer:
                 try:
-                    renderer(c, bx, by, bw, bh)
+                    if abs(rot_deg) < 0.08 or abs(rot_deg - 360.0) < 0.08:
+                        renderer(c, sbx, sby, sw, sh)
+                    else:
+                        rad = math.radians(rot_deg)
+                        scx = sbx + sw * 0.5
+                        scy = sby + sh * 0.5
+                        proxy = RotatedCanvasProxy(
+                            c, scx, scy, math.cos(rad), math.sin(rad))
+                        renderer(proxy, sbx, sby, sw, sh)
                 except Exception:
                     pass
 
-        # Furniture (applies rotation if any)
+        wall_list = getattr(tpl, "walls", None) or []
+        for wi in wall_list:
+            xa, ya = room.template_point_to_world(wi.x0, wi.y0)
+            xb, yb = room.template_point_to_world(wi.x1, wi.y1)
+            w_world = Wall(
+                x0=xa, y0=ya, x1=xb, y1=yb,
+                thickness=float(wi.thickness),
+                color=wi.color,
+            )
+            _draw_wall_scaled(
+                c, w_world,
+                self._plan_view_ox, self._plan_view_oy, self._plan_view_s)
+
         bx, by, _, _ = room.world_bbox()
         for fi in tpl.furniture:
-            # Apply rotation (multiple of 90) by mapping local (x,y,w,h) into
-            # bbox space. For 0°: direct; for 90°/180°/270° permute.
             fx, fy, fw, fh = fi.x, fi.y, fi.w, fi.h
             rot = int(room.rotation) % 360
             tbbx, tbby, tbw, tbh = tpl.bbox()
-            # normalise item coords relative to template bbox
             ix = fx - tbbx
             iy = fy - tbby
             if rot == 0:
@@ -853,28 +1036,34 @@ class PlanCanvasRenderer:
             placed = FurnitureItem(
                 type=fi.type, x=0, y=0, w=nw, h=nh,
                 color=fi.color, rotation=fi.rotation, custom_id=fi.custom_id)
+            ax, ay = self._w2s(bx + nx, by + ny)
             _draw_furniture_scaled_rotated(
-                c, placed, bx + nx, by + ny, float(nw), float(nh))
+                c, placed, ax, ay, float(nw) * vp, float(nh) * vp)
 
-        # Pin indicator
         if room.pinned:
             bx, by, bw, bh = room.world_bbox()
-            c.create_oval(bx + bw - 14, by + 2, bx + bw - 2, by + 14,
-                          fill="#E85D24", outline="white", width=1.5)
+            ox0, oy0 = self._w2s(bx + bw - 14, by + 2)
+            ox1, oy1 = self._w2s(bx + bw - 2, by + 14)
+            c.create_oval(
+                min(ox0, ox1), min(oy0, oy1), max(ox0, ox1), max(oy0, oy1),
+                fill="#E85D24", outline="white",
+                width=self._lw(1.5))
 
-        # Label
         if show_label:
             bx, by, bw, bh = room.world_bbox()
-            c.create_text(bx + bw / 2, by + bh - 10,
+            tx, ty = self._w2s(bx + bw / 2.0, by + bh - 10.0)
+            c.create_text(tx, ty,
                           text=tpl.label, font=("Helvetica", 8),
                           fill="#444")
 
-        # Selection outline
         if selected:
-            cx, cy, bw, bh = room.world_bbox()
-            c.create_rectangle(cx - SEL_PAD, cy - SEL_PAD,
-                               cx + bw + SEL_PAD, cy + bh + SEL_PAD,
-                               outline=C_SELECT, width=SEL_WIDTH, fill="")
+            cx_, cy_, bw, bh = room.world_bbox()
+            ax0, ay0 = self._w2s(cx_ - SEL_PAD, cy_ - SEL_PAD)
+            ax1, ay1 = self._w2s(cx_ + bw + SEL_PAD, cy_ + bh + SEL_PAD)
+            c.create_rectangle(ax0, ay0, ax1, ay1,
+                               outline=C_SELECT,
+                               width=self._lw(SEL_WIDTH), fill="")
 
     def hit_test(self, px: float, py: float, plan: Plan) -> Optional[RoomInstance]:
+        """``px``, ``py`` must be **world** coordinates."""
         return plan.room_at(px, py)

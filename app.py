@@ -47,6 +47,7 @@ class AppShell(tk.Tk):
         # Cross-stage hand-off plan: when Stage 2 "sends to finalize" it
         # stores the plan here; Stage 3 picks it up on activation.
         self.handoff_plan: Plan | None = None
+        self.last_llm_settings: dict | None = None
 
         # Layout skeleton
         self._build_stepbar()

@@ -23,6 +23,7 @@ from geometry_utils import snap_to_grid, overlaps_any
 from model.plan import Plan, RoomInstance
 from model.room_template import RoomTemplate
 from model.room_library import RoomLibrary
+from orientation_pass import apply_orientation_goal
 
 # Legacy size map (kept only for `pack_rooms_into_hotel` used by tests).
 from config import (
@@ -59,6 +60,88 @@ _LEGACY_CLASSES = {
 Candidate = Tuple[str, RoomTemplate, float]  # (key, template, weight)
 
 DEFAULT_TRY = 200
+
+
+def _layout_effective_pad(base_pad: int, layout_style: str,
+                          min_center_distance: float) -> int:
+    lp = max(0, int(base_pad))
+    mcd = float(min_center_distance or 0.0)
+    extra = int(round(mcd * 0.5))
+    if layout_style == "scattered":
+        extra += 14
+    elif layout_style == "clustered":
+        extra = max(0, extra - 6)
+    return max(0, min(160, lp + extra))
+
+
+def _sample_xy(
+        rx0: int, ry0: int, rw: int, rh: int,
+        tw: int, th: int,
+        sx: int, sy: int, sw: int, sh: int,
+        grid: int,
+        clustering: float,
+        layout_style: str,
+        ) -> Optional[Tuple[float, float]]:
+    """Return a candidate ``(x, y)`` for bbox origin or ``None`` if degenerate."""
+    if rw < tw or rh < th:
+        return None
+    lo_x = float(rx0)
+    hi_x = float(rx0 + rw - tw)
+    lo_y = float(ry0)
+    hi_y = float(ry0 + rh - th)
+    if hi_x < lo_x or hi_y < lo_y:
+        return None
+
+    reg_cx = (lo_x + hi_x) / 2.0
+    reg_cy = (lo_y + hi_y) / 2.0
+    site_cx = float(sx + sw / 2.0)
+    site_cy = float(sy + sh / 2.0)
+    target_x = reg_cx * (1.0 - clustering) + (0.6 * reg_cx + 0.4 * site_cx) * clustering
+    target_y = reg_cy * (1.0 - clustering) + (0.6 * reg_cy + 0.4 * site_cy) * clustering
+
+    ls = (layout_style or "mixed").lower()
+    if ls == "corridor":
+        reg_cy = (lo_y + hi_y) / 2.0
+        jitter = min(hi_y - lo_y, (hi_y - lo_y) * 0.35 + 1e-6)
+        y = reg_cy + (random.random() - 0.5) * jitter
+        y = max(lo_y, min(hi_y, y))
+        x = random.uniform(lo_x, hi_x)
+    elif ls == "scattered":
+        jx = (random.random() - 0.5) * (hi_x - lo_x) * 0.2
+        jy = (random.random() - 0.5) * (hi_y - lo_y) * 0.2
+        ux = random.uniform(lo_x, hi_x) + jx
+        uy = random.uniform(lo_y, hi_y) + jy
+        x = max(lo_x, min(hi_x, ux))
+        y = max(lo_y, min(hi_y, uy))
+    elif ls == "clustered":
+        x = max(lo_x, min(hi_x,
+                          random.gauss(target_x, (hi_x - lo_x) * 0.18 + 1e-6)))
+        y = max(lo_y, min(hi_y,
+                          random.gauss(target_y, (hi_y - lo_y) * 0.18 + 1e-6)))
+    else:
+        ux = random.uniform(lo_x, hi_x)
+        uy = random.uniform(lo_y, hi_y)
+        x = ux * (1.0 - clustering) + target_x * clustering
+        y = uy * (1.0 - clustering) + target_y * clustering
+        x = max(lo_x, min(hi_x, x))
+        y = max(lo_y, min(hi_y, y))
+
+    return (snap_to_grid(x, grid), snap_to_grid(y, grid))
+
+
+def _allocate_rooms_per_zone(
+        n_total: int, n_zones: int,
+        explicit: Optional[List[int]],
+        ) -> List[int]:
+    """When ``explicit`` omitted, evenly split ``n_total``."""
+    if n_zones <= 0:
+        return []
+    if explicit and len(explicit) == n_zones and sum(explicit) > 0:
+        return [max(0, int(x)) for x in explicit]
+    nt = max(1, n_total)
+    base = nt // n_zones
+    rem = nt % n_zones
+    return [base + (1 if i < rem else 0) for i in range(n_zones)]
 
 
 # ---------------------------------------------------------------------------
@@ -116,20 +199,31 @@ def pack_rooms(site: Tuple[int, int, int, int],
                zones: Optional[List[Tuple[int, int, int, int]]] = None,
                zone_weights: Optional[List[Optional[Dict[str, float]]]] = None,
                library: Optional[RoomLibrary] = None,
-               existing: Optional[List[RoomInstance]] = None) -> Plan:
+               existing: Optional[List[RoomInstance]] = None,
+               *,
+               clustering: float = 0.0,
+               layout_style: str = "mixed",
+               try_multiplier: float = 1.0,
+               rooms_per_zone: Optional[List[int]] = None,
+               ) -> Plan:
     """
-    Dart-throw `n_rooms` instances of the supplied candidates into the site.
+    Dart-throw ``n_rooms`` instances into the site (or per-zone quotas).
 
-    If `zones` are given, rooms are instead distributed across each zone,
-    optionally weighted by a per-zone weights dict (keys as in
-    `_candidates_from_library`).
+    With ``zones``, uses ``rooms_per_zone`` when provided (sums drive totals),
+    else splits ``n_rooms`` across zones.
     """
     if seed is not None:
         random.seed(seed)
 
+    tm = float(try_multiplier) if try_multiplier > 0 else 1.0
+    tm = max(0.25, min(5.0, tm))
+    inner_tries = max(40, int(DEFAULT_TRY * tm))
+
     plan = Plan()
     plan.site = site
     sx, sy, sw, sh = site
+    clump = float(max(0.0, min(1.0, clustering)))
+    lst = str(layout_style or "mixed").lower()
 
     existing_boxes: List[Tuple[int, int, int, int]] = []
     if existing:
@@ -141,7 +235,7 @@ def pack_rooms(site: Tuple[int, int, int, int],
     def _try_place(c_list: List[Candidate], region) -> bool:
         if not c_list:
             return False
-        for _ in range(DEFAULT_TRY):
+        for _ in range(inner_tries):
             pick = _pick(c_list)
             if not pick:
                 return False
@@ -152,8 +246,11 @@ def pack_rooms(site: Tuple[int, int, int, int],
             rx0, ry0, rw, rh = region
             if tw >= rw or th >= rh:
                 continue
-            x = snap_to_grid(random.uniform(rx0, rx0 + rw - tw), grid)
-            y = snap_to_grid(random.uniform(ry0, ry0 + rh - th), grid)
+            xy = _sample_xy(rx0, ry0, rw, rh, tw, th, sx, sy, sw, sh,
+                            grid, clump, lst)
+            if xy is None:
+                continue
+            x, y = xy
             if x < sx or y < sy or x + tw > sx + sw or y + th > sy + sh:
                 continue
             if overlaps_any((x, y, tw, th), existing_boxes, pad=pad):
@@ -163,8 +260,6 @@ def pack_rooms(site: Tuple[int, int, int, int],
                 template_snapshot=tpl.copy(),
                 x=x, y=y,
             )
-            # Shift polygon so its bbox starts at (0,0) inside the template;
-            # x,y above is the world offset for bbox origin.
             tpl2 = inst.template_snapshot
             tpl2.normalise()
             plan.add_room(inst)
@@ -173,11 +268,12 @@ def pack_rooms(site: Tuple[int, int, int, int],
         return False
 
     if zones:
+        nz = len(zones)
+        alloc = _allocate_rooms_per_zone(n_rooms, nz, rooms_per_zone)
         for zi, zone in enumerate(zones):
             plan.zones.append(zone)
             zone_cands = candidates
             if zone_weights and zi < len(zone_weights) and zone_weights[zi]:
-                # rebuild candidates with zone-specific weights
                 zone_w = zone_weights[zi]
                 zone_cands = []
                 for k, t, _w in candidates:
@@ -186,8 +282,8 @@ def pack_rooms(site: Tuple[int, int, int, int],
                         zw = zone_w.get(f"#{t.roomtype}", 0.0)
                     if zw > 0:
                         zone_cands.append((k, t, float(zw)))
-            per_zone = max(1, n_rooms // len(zones))
-            for _ in range(per_zone):
+            n_here = alloc[zi] if zi < len(alloc) else max(1, n_rooms // nz)
+            for _ in range(max(0, n_here)):
                 _try_place(zone_cands, zone)
     else:
         for _ in range(n_rooms):
@@ -362,12 +458,31 @@ def _spatial_zones_and_weights(
     sx, sy, sw, sh = site
     half_w = max(1, sw // 2)
     half_h = max(1, sh // 2)
+    tw = max(1, sw // 3)
+    th = max(1, sh // 3)
+    qw = max(1, sw // 2)
+    qh = max(1, sh // 2)
+
     top = (sx, sy, sw, half_h)
     bot = (sx, sy + half_h, sw, sh - half_h)
     left = (sx, sy, half_w, sh)
     right = (sx + half_w, sy, sw - half_w, sh)
+
+    wst = (sx, sy, tw, sh)
+    west_rest = (sx + tw, sy, sw - tw, sh)
+    est = (sx + sw - tw, sy, tw, sh)
+    east_rest = (sx, sy, sw - tw, sh)
+
+    nth = (sx, sy, sw, th)
+    midh = (sx, sy + th, sw, th)
+    south_rest = (sx, sy + 2 * th, sw, sh - 2 * th)
+
+    nstrip = (sx, sy, sw, th)
+    srest = (sx, sy + th, sw, sh - th)
+
     zbed = _zone_weight_by_roomtype(library, full_w, "bedroom")
     zpub = _zone_weight_by_roomtype(library, full_w, "public room")
+
     if spatial == "bedrooms_top":
         return [top, bot], [zbed, zpub]
     if spatial == "bedrooms_bottom":
@@ -376,7 +491,123 @@ def _spatial_zones_and_weights(
         return [left, right], [zbed, zpub]
     if spatial == "bedrooms_right":
         return [left, right], [zpub, zbed]
+
+    if spatial == "bedrooms_west_third":
+        return [wst, west_rest], [zbed, zpub]
+    if spatial == "bedrooms_east_third":
+        return [east_rest, est], [zpub, zbed]
+    if spatial == "bedrooms_north_third":
+        return [nstrip, srest], [zbed, zpub]
+    if spatial == "bedrooms_south_third":
+        return [srest, nstrip], [zpub, zbed]
+
+    # Three stacked horizontal bands
+    if spatial == "bedrooms_north_middle_south_three":
+        z3 = (sx, sy + 2 * th, sw, max(1, sh - 2 * th))
+        return [nth, midh, z3], [zbed, zpub, zpub]
+
+    # Three vertical columns
+    if spatial == "bedrooms_west_middle_east_three":
+        cw = max(1, sw // 3)
+        c0 = (sx, sy, cw, sh)
+        c1 = (sx + cw, sy, cw, sh)
+        c2 = (sx + 2 * cw, sy, max(1, sw - 2 * cw), sh)
+        return [c0, c1, c2], [zbed, zpub, zpub]
+
+    # Four quadrants — bedroom emphasis in one corner
+    nw = (sx, sy, qw, qh)
+    ne = (sx + qw, sy, sw - qw, qh)
+    swq = (sx, sy + qh, qw, sh - qh)
+    se = (sx + qw, sy + qh, sw - qw, sh - qh)
+    if spatial == "bedrooms_nw_quarter":
+        return [nw, ne, swq, se], [zbed, zpub, zpub, zpub]
+    if spatial == "bedrooms_ne_quarter":
+        return [nw, ne, swq, se], [zpub, zbed, zpub, zpub]
+    if spatial == "bedrooms_sw_quarter":
+        return [nw, ne, swq, se], [zpub, zpub, zbed, zpub]
+    if spatial == "bedrooms_se_quarter":
+        return [nw, ne, swq, se], [zpub, zpub, zpub, zbed]
+
     return None, None
+
+
+def _pixel_zones_from_normalized(
+        site: Tuple[int, int, int, int],
+        rel_list: List[Tuple[float, float, float, float]],
+        ) -> List[Tuple[int, int, int, int]]:
+    sx, sy, sw, sh = site
+    out: List[Tuple[int, int, int, int]] = []
+    for fx, fy, fw, fh in rel_list:
+        x = int(sx + fx * sw)
+        y = int(sy + fy * sh)
+        w = max(30, int(fw * sw))
+        h = max(30, int(fh * sh))
+        x = max(sx, min(sx + sw - w, x))
+        y = max(sy, min(sy + sh - h, y))
+        w = min(w, sx + sw - x)
+        h = min(h, sy + sh - y)
+        if w >= 30 and h >= 30:
+            out.append((x, y, w, h))
+    return out
+
+
+def _merge_zone_spec_weights(
+        library: RoomLibrary,
+        full_w: Dict[str, float],
+        spec: dict,
+        ) -> Dict[str, float]:
+    """Single zone weight map: template key -> float."""
+    raw = spec.get("weights")
+    out: Dict[str, float] = {}
+    for key, tpl in library.all():
+        w = None
+        if isinstance(raw, dict):
+            w = raw.get(tpl.label)
+            if w is None:
+                w = raw.get(f"#{tpl.roomtype}")
+        if w is None:
+            w = full_w.get(key, 0.0)
+        out[key] = max(0.0, float(w))
+    return out
+
+
+def _apply_bedroom_bias(full_w: Dict[str, float],
+                        library: RoomLibrary,
+                        bias: float) -> None:
+    """Scale bedroom vs public template weights in place."""
+    b = max(0.0, min(1.0, float(bias)))
+    for key, tpl in library.all():
+        if tpl.roomtype == "bedroom":
+            full_w[key] *= 0.25 + 0.75 * b
+        else:
+            full_w[key] *= 0.25 + 0.75 * (1.0 - b)
+
+
+def _apply_roomtype_weights(
+        full_w: Dict[str, float],
+        library: RoomLibrary,
+        rtw: Dict[str, float],
+        ) -> None:
+    for key, tpl in library.all():
+        rt = tpl.roomtype
+        if rt in rtw:
+            full_w[key] *= max(0.0, float(rtw[rt]))
+
+
+def _enabled_types_from_settings(settings: dict) -> Optional[List[str]]:
+    """Normalize ``enabled_roomtypes`` / ``roomtypes`` for ``_candidates_from_library``."""
+    raw = settings.get("enabled_roomtypes") or settings.get("roomtypes")
+    if not isinstance(raw, list) or not raw:
+        return None
+    known = frozenset({"bedroom", "public room"})
+    out: List[str] = []
+    for x in raw:
+        s = str(x).strip().lower().replace("_", " ")
+        if s in ("public", "commons", "communal"):
+            s = "public room"
+        if s in known and s not in out:
+            out.append(s)
+    return out if out else None
 
 
 def pack_from_llm_settings(
@@ -386,29 +617,97 @@ def pack_from_llm_settings(
         seed: Optional[int] = None,
         ) -> Plan:
     """
-    Build a plan from ``llm_bridge.prompt_to_settings`` output:
-    weights, n_rooms, pad, n_bushes, spatial.
+    Build a plan from ``llm_bridge.prompt_to_settings`` output (rich schema).
     """
     preset_w = settings.get("weights") or {}
     full_w = expand_preset_weights_for_library(library, preset_w)
-    cands = _candidates_from_library(library, None, full_w)
+
+    if "roomtype_weights" in settings and isinstance(settings["roomtype_weights"], dict):
+        _apply_roomtype_weights(
+            full_w, library, settings["roomtype_weights"])
+
+    if "bedroom_bias" in settings:
+        _apply_bedroom_bias(full_w, library, float(settings["bedroom_bias"]))
+
+    enabled_types = _enabled_types_from_settings(settings)
+    cands = _candidates_from_library(library, enabled_types, full_w)
+    if not cands:
+        cands = _candidates_from_library(library, None, full_w)
     if not cands:
         cands = _candidates_from_library(library, None, None)
+
     n_rooms = int(settings.get("n_rooms", N_ROOMS_DEFAULT))
     n_rooms = max(2, min(40, n_rooms))
-    pad = int(settings.get("pad", 30))
-    pad = max(0, min(80, pad))
-    spatial = settings.get("spatial", "mixed")
-    zones, zone_weights = _spatial_zones_and_weights(
-        library, site, full_w, spatial)
+    base_pad = int(settings.get("pad", 30))
+    base_pad = max(0, min(120, base_pad))
+    layout_style = str(settings.get("layout_style", "mixed")).lower()
+    mcd = float(settings.get("min_center_distance") or 0.0)
+    eff_pad = _layout_effective_pad(base_pad, layout_style, mcd)
+
+    clustering = float(settings.get("clustering") or 0.0)
+    clustering = max(0.0, min(1.0, clustering))
+    if layout_style == "clustered":
+        clustering = max(clustering, 0.35)
+    if layout_style == "scattered":
+        clustering *= 0.4
+
+    try_mult = float(settings.get("entropy") or 1.0)
+    try_mult = max(0.3, min(4.0, try_mult))
+
+    rooms_pz = settings.get("rooms_per_zone")
+    zs_norm = settings.get("zones_normalized")
+    zones: Optional[List[Tuple[int, int, int, int]]] = None
+    zone_weights: Optional[List[Optional[Dict[str, float]]]] = None
+
+    if isinstance(zs_norm, list) and zs_norm:
+        rel = []
+        for z in zs_norm:
+            if isinstance(z, (list, tuple)) and len(z) >= 4:
+                rel.append((float(z[0]), float(z[1]), float(z[2]), float(z[3])))
+            elif isinstance(z, dict):
+                rel.append((float(z.get("x", 0)), float(z.get("y", 0)),
+                            float(z.get("w", 1)), float(z.get("h", 1))))
+        zon = _pixel_zones_from_normalized(site, rel)
+        if zon:
+            zones = zon
+            specs = settings.get("zones_specs") or []
+            zwlist: List[Optional[Dict[str, float]]] = []
+            for i in range(len(zones)):
+                sp = specs[i] if i < len(specs) else {"max": 10, "weights": {}}
+                zwlist.append(_merge_zone_spec_weights(library, full_w, sp))
+            zone_weights = zwlist
+
+    spatial = str(settings.get("spatial", "mixed"))
+    if (
+            enabled_types is not None
+            and len(enabled_types) == 1
+            and spatial.startswith("bedrooms_")):
+        spatial = "mixed"
+    if zones is None:
+        zones, zone_weights = _spatial_zones_and_weights(
+            library, site, full_w, spatial)
+
+    kwargs: dict = dict(
+        site=site,
+        candidates=cands,
+        n_rooms=n_rooms,
+        seed=seed,
+        pad=eff_pad,
+        clustering=clustering,
+        layout_style=layout_style,
+        try_multiplier=try_mult,
+        rooms_per_zone=(
+            rooms_pz if isinstance(rooms_pz, list) else None),
+    )
+
     if zones and zone_weights:
-        plan = pack_rooms(
-            site=site, candidates=cands, n_rooms=n_rooms,
-            seed=seed, pad=pad, zones=zones, zone_weights=zone_weights)
-    else:
-        plan = pack_rooms(
-            site=site, candidates=cands, n_rooms=n_rooms,
-            seed=seed, pad=pad)
+        kwargs["zones"] = zones
+        kwargs["zone_weights"] = zone_weights
+
+    plan = pack_rooms(**kwargs)
+    og = str(settings.get("orientation_goal") or "mixed").lower()
+    if og in ("inward_collaborative", "outward_private"):
+        apply_orientation_goal(plan, site, og)
     return plan
 
 
@@ -420,8 +719,12 @@ def pack_bushes_for_llm(
     nb = settings.get("n_bushes")
     if nb is None:
         nb = N_BUSHES
-    nb = max(0, min(80, int(nb)))
-    return pack_bushes(site, plan, seed=seed, n_bushes=nb)
+    nb = max(0, min(120, int(nb)))
+    bp = settings.get("bush_pad")
+    pad_b = 15
+    if bp is not None:
+        pad_b = max(0, min(120, int(bp)))
+    return pack_bushes(site, plan, seed=seed, n_bushes=nb, pad=pad_b)
 
 
 # ---------------------------------------------------------------------------

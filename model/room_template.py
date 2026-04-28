@@ -54,15 +54,15 @@ class FurnitureItem:
 class Wall:
     """An interior divider drawn inside a room (local coordinates).
 
-    Represented as a thick line segment from (x0,y0) to (x1,y1). Thickness
-    is stored in pixels (convert via units.ft_to_px for persistence).
-    Walls are currently visual only: they do not block furniture placement.
+    Represented as a thick line segment from (x0,y0) to (x1,y1). ``thickness``
+    is in template world units (same as ``AUTHOR_WALL_DEPTH_WORLD`` /
+    Door depth). Stored walls scale visually with ``scale`` on canvas.
     """
     x0: float
     y0: float
     x1: float
     y1: float
-    thickness: float = 6.0                 # pixels
+    thickness: float = 0.3
     color: str = "#6E6E6A"                 # slate
 
     def to_dict(self) -> dict:
@@ -73,7 +73,7 @@ class Wall:
         return cls(
             x0=float(d["x0"]), y0=float(d["y0"]),
             x1=float(d["x1"]), y1=float(d["y1"]),
-            thickness=float(d.get("thickness", 6.0)),
+            thickness=float(d.get("thickness", 0.3)),
             color=d.get("color", "#6E6E6A"),
         )
 

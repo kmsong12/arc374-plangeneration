@@ -16,6 +16,9 @@ Interaction:
     * Click a furniture item in the left list -> arms it as the active
       "brush"; click on the canvas to drop it.  Click a placed item to
       select it (blue outline); drag to move; Delete to remove.
+    * Doors and windows latch onto interior walls **or** each edge of the room
+      polygon (the first outline), aligned to the segment; depth matches wall
+      slab / outline thickness where relevant.
     * Click an interior wall to select (blue centerline); drag to move;
       Delete to remove. Not available while the wall-drawing tool is on
       or while a furniture brush is armed. New walls must stay inside the
@@ -27,6 +30,8 @@ Interaction:
       the new angle would be invalid, the rotation is refused).
     * 'Save Room...' button opens a dialog for title + roomtype, then
       writes the authored template into `RoomLibrary`.
+    * Room Library: Remove room deletes a template from the library;
+      Del on a furniture line removes that piece from the saved template.
     * 'Reset' clears the canvas to a blank rectangle.
 """
 
@@ -42,10 +47,13 @@ from typing import List, Optional, Tuple
 from canvas_renderer import RoomCanvasRenderer
 from config import (
     GRID_SIZE, SIDEBAR_LEFT_W, SIDEBAR_RIGHT_W, CANVAS_W, CANVAS_H,
-    ROOM_POLYGON_OUTLINE_PX, room_outline_thickness_template,
+    AUTHOR_WALL_DEPTH_WORLD,
+    room_outline_thickness_template,
 )
 from geometry_utils import (
     point_in_polygon,
+    polygon_centroid,
+    point_in_polygon_interior_lenient,
     regular_polygon, snap_to_grid,
     aabb_too_close_to_poly_edges,
     thick_segment_overlaps_rect,
@@ -60,7 +68,7 @@ from model.custom_furniture import (
 )
 from model.room_template import FurnitureItem, RoomTemplate, Wall
 from theme import C, label_button, section, hsep
-from units import fmt_ft, ft_to_px, px_to_ft
+from units import fmt_ft, ft_to_px, px_to_ft, fmt_dims
 from furniture_geometry import apply_resize, furniture_handle_positions
 
 FURN_HANDLE_PX = 9.0
@@ -125,7 +133,7 @@ class AuthorStage(tk.Frame):
 
         # --- wall-drawing tool state ---
         self._wall_mode: bool = False
-        # Matches `ROOM_POLYGON_OUTLINE_PX` at a nominal scale; updated on each wall op.
+        # Matches ``AUTHOR_WALL_DEPTH_WORLD`` at a nominal scale; updated on wall ops.
         self._pending_wall_thickness_px: float = room_outline_thickness_template(1.0)
         self._wall_start: Optional[Tuple[float, float]] = None
         self._wall_preview_id: Optional[int] = None
@@ -146,8 +154,9 @@ class AuthorStage(tk.Frame):
         self._template_stack: List[Tuple[dict, Optional[str]]] = []
         # First (snapshot, editing_key) before any library drill-down (Home).
         self._browse_home_snapshot: Optional[Tuple[dict, Optional[str]]] = None
-        # Door/Window placement: highlight polygon edge (index, valid) in canvas.
-        self._opening_edge_glow: Optional[Tuple[int, bool]] = None
+        # Door/Window placement: highlight snap target in canvas.
+        # (("poly", edge_idx) | ("interior", wall_idx), valid)
+        self._opening_edge_glow: Optional[Tuple[Tuple[str, int], bool]] = None
 
         self._build_layout()
         self._install_toolbar()
@@ -372,7 +381,8 @@ class AuthorStage(tk.Frame):
             font=("Helvetica", 8), wraplength=col_w, justify="center")
         sub.pack(pady=(2, 0))
         dim = tk.Label(
-            cell, text=f"{int(spec.w)}\u00d7{int(spec.h)}", bg=C["good_lt"],
+            cell, text=fmt_dims(float(spec.w), float(spec.h)),
+            bg=C["good_lt"],
             fg=C["text_dim"], font=("Helvetica", 7))
         dim.pack()
 
@@ -390,6 +400,10 @@ class AuthorStage(tk.Frame):
             self._sync_cancel_placement_button()
             self.shell.set_status(
                 f"Armed: {lab} — click on the canvas to place.")
+            try:
+                self.canvas.focus_set()
+            except tk.TclError:
+                pass
 
         for w in (cell, swatch, sub, dim):
             w.bind("<Button-1>", on_click)
@@ -427,6 +441,11 @@ class AuthorStage(tk.Frame):
             self._armed_rotation = 0.0
             self._sync_cancel_placement_button()
             self.shell.set_status(f"Armed: {lab} — click on canvas.")
+            try:
+                self.canvas.focus_set()
+            except tk.TclError:
+                pass
+
         for w in (cell, swatch, sub):
             w.bind("<Button-1>", on_click)
         for w in (cell, swatch, sub):
@@ -449,10 +468,13 @@ class AuthorStage(tk.Frame):
         top.pack(fill="x", padx=10, pady=(10, 4))
         tk.Label(top, text="Room Library", font=("Helvetica", 11, "bold"),
                  bg=C["panel"], fg=C["text"]).pack(anchor="w")
-        tk.Label(top, text="Click a template to open it. Use Save to add or update the library file.",
-                 font=("Helvetica", 8), bg=C["panel"],
-                 fg=C["text_dim"], wraplength=SIDEBAR_RIGHT_W - 20,
-                 justify="left").pack(anchor="w")
+        tk.Label(
+            top,
+            text="Click a template to edit. Save adds or updates the library. "
+                 "Remove room deletes the template; Del on a line removes that "
+                 "furniture piece from the saved template.",
+            font=("Helvetica", 8), bg=C["panel"], fg=C["text_dim"],
+            wraplength=SIDEBAR_RIGHT_W - 20, justify="left").pack(anchor="w")
 
         nav1 = tk.Frame(top, bg=C["panel"]); nav1.pack(fill="x", pady=(4, 2))
         self._back_btn = label_button(
@@ -492,7 +514,7 @@ class AuthorStage(tk.Frame):
         self._border_swatch.pack(side="left", padx=4)
         self._border_swatch.bind("<Button-1>", lambda e: self._pick_border())
 
-        # Interior walls (color matches room border; thickness 6" template px).
+        # Interior walls (same slab depth as Door / exterior outline).
         wall_row = tk.Frame(apbox, bg=C["panel"]); wall_row.pack(fill="x", pady=(6, 2))
         tk.Label(wall_row, text="Interior walls", bg=C["panel"],
                  font=("Helvetica", 9, "bold")).pack(side="left")
@@ -759,6 +781,12 @@ class AuthorStage(tk.Frame):
                  bg=C["panel"], fg=C["text_dim"],
                  font=("Helvetica", 8), anchor="w").pack(fill="x")
 
+        act = tk.Frame(row, bg=C["panel"])
+        act.pack(side="right", padx=(2, 0))
+        label_button(
+            act, "Remove room",
+            lambda k=key: self._delete_room_from_library(k)).pack(side="left")
+
         def on_load(_e=None, tkey=key):
             self._load_from_library(tkey, edit=True)
 
@@ -770,6 +798,10 @@ class AuthorStage(tk.Frame):
         if tpl.furniture:
             furn = tk.Frame(outer, bg=C["panel"])
             furn.pack(fill="x", padx=(66, 2), pady=(2, 0))
+            tk.Label(
+                furn, text="Furniture in saved template (Del removes from file):",
+                bg=C["panel"], fg=C["text_dim"], font=("Helvetica", 7),
+                anchor="w").pack(fill="x", pady=(0, 2))
             for i, fi in enumerate(tpl.furniture):
                 cell = tk.Frame(furn, bg=C["good_lt"], highlightthickness=1,
                                 highlightbackground=C["panel_bdr"])
@@ -783,8 +815,45 @@ class AuthorStage(tk.Frame):
                          font=("Helvetica", 8), anchor="w").pack(
                     side="left", fill="x", expand=True)
                 del_btn = label_button(
-                    cell, "Del", lambda k=key, idx=i: self._delete_furniture_from_library_slot(k, idx))
+                    cell, "Del",
+                    lambda k=key, idx=i: self._delete_furniture_from_library_slot(k, idx))
                 del_btn.pack(side="right", padx=2, pady=1)
+
+    def _delete_room_from_library(self, key: str) -> None:
+        tpl = self.library.get(key)
+        if tpl is None:
+            return
+        lab = tpl.label
+        if not messagebox.askyesno(
+                "Remove room",
+                f"Remove \u2018{lab}\u2019 from the library?\nThis cannot be undone.",
+                parent=self):
+            return
+        self.library.remove(key)
+        if self._editing_key == key:
+            self._new_blank_and_draw()
+            self.shell.set_status(f"Removed \u2018{lab}\u2019 from library.")
+            self._render_library()
+            self._redraw()
+            return
+        self._sanitize_navigation_after_room_removed(key)
+        self._render_library()
+        self.shell.set_status(f"Removed \u2018{lab}\u2019 from library.")
+        self._redraw()
+
+    def _sanitize_navigation_after_room_removed(self, key: str) -> None:
+        """Clear stale library keys from stack / Home after a template is deleted."""
+        new_stack = []
+        for snap, ekey in self._template_stack:
+            nk = None if ekey == key else ekey
+            new_stack.append((snap, nk))
+        self._template_stack = new_stack
+        if self._browse_home_snapshot is not None:
+            bs, bk = self._browse_home_snapshot
+            if bk == key:
+                self._browse_home_snapshot = (bs, None)
+        self._sync_back_button()
+        self._sync_home_button()
 
     def _delete_furniture_from_library_slot(self, key: str, idx: int) -> None:
         tpl = self.library.get(key)
@@ -908,7 +977,7 @@ class AuthorStage(tk.Frame):
         new_r = (float(fi.rotation) + float(delta_deg)) % 360.0
         if not self._is_furniture_placement_valid(
                 fi.x, fi.y, fi.w, fi.h, rotation=new_r,
-                exclude_idx=idx):
+                exclude_idx=idx, furniture_type=fi.type):
             self.shell.set_status(
                 "Can't rotate there — would hit a wall or leave the room.")
             self.canvas.bell()
@@ -1114,15 +1183,18 @@ class AuthorStage(tk.Frame):
                     color=color, rotation=rot)
                 got = self._try_snap_opening(fi, fi.x, fi.y)
                 if got is not None:
-                    nx, ny, nrot, _e = got
+                    nx, ny, nrot, _gk, ow, oh = got
                     rot = nrot
                     ogx, ogy, ogrot = nx, ny, nrot
-                    is_valid = True
+                    w, h = ow, oh
+                    is_valid = self._is_furniture_placement_valid(
+                        nx, ny, ow, oh, rotation=nrot,
+                        furniture_type=key)
                 else:
                     is_valid = False
             else:
                 is_valid = self._is_furniture_placement_valid(
-                    x0, y0, w, h, rotation=rot)
+                    x0, y0, w, h, rotation=rot, furniture_type=key)
         else:
             is_valid = self._is_furniture_placement_valid(
                 x0, y0, w, h, rotation=rot)
@@ -1344,46 +1416,91 @@ class AuthorStage(tk.Frame):
 
     def _furniture_inside_room(self, x: float, y: float,
                                 w: float, h: float,
-                                rotation: float = 0.0) -> bool:
-        """True when the rotated furniture footprint sits fully inside
-        the current room polygon."""
+                                rotation: float = 0.0,
+                                relax_for_wall_opening: bool = False,
+                                ) -> bool:
+        """True when the rotated footprint sits inside the room polygon.
+
+        ``relax_for_wall_opening``: for doors/windows on the **exterior** shell,
+        the opening straddles the boundary; corners on the façade may lie outside
+        the interior polygon while the piece is still valid. In that case only
+        corners on the room-interior side (vs polygon centroid) must be inside.
+        """
         poly = self.template.polygon
         if not poly or len(poly) < 3:
             return True
         corners = rotated_rect_corners(x, y, w, h, rotation)
         cx = x + w / 2.0
         cy = y + h / 2.0
-        samples = list(corners) + [(cx, cy)]
-        return all(point_in_polygon(p, poly) for p in samples)
+        if not relax_for_wall_opening:
+            samples = list(corners) + [(cx, cy)]
+            return all(point_in_polygon(p, poly) for p in samples)
+
+        if not point_in_polygon((cx, cy), poly):
+            return False
+        gcx, gcy = polygon_centroid(poly)
+        inx, iny = gcx - cx, gcy - cy
+        ilen = math.hypot(inx, iny)
+        if ilen < 1e-9:
+            samples = list(corners) + [(cx, cy)]
+            return all(point_in_polygon(p, poly) for p in samples)
+        for p in corners:
+            vx, vy = p[0] - cx, p[1] - cy
+            vlen = math.hypot(vx, vy)
+            cosang = ((vx * inx + vy * iny) / (ilen * vlen)
+                      if vlen > 1e-12 else -1.0)
+            if cosang < -0.02:
+                continue
+            if not point_in_polygon(p, poly):
+                return False
+        return True
 
     def _furniture_overlaps_others(
             self, x: float, y: float, w: float, h: float,
             rotation: float = 0.0,
-            exclude_idx: Optional[int] = None) -> bool:
-        """True when the rotated footprint overlaps another piece's (rotated)
-        axis-aligned bounds. Uses tight AABBs in world space so 90° rotations
-        are not compared using stale unrotated boxes."""
+            exclude_idx: Optional[int] = None,
+            furniture_type: Optional[str] = None,
+            ) -> bool:
+        """Rotated AABB vs other pieces. Door/Window vs Door/Window uses a small
+        inward shrink so adjacent openings on the same wall are not rejected as
+        overlapping due to loose bounding boxes."""
         minx, miny, maxx, maxy = rotated_rect_bounds(x, y, w, h, rotation)
         for i, fi in enumerate(self.template.furniture):
             if i == exclude_idx:
                 continue
             om, oy, oX, oY = rotated_rect_bounds(
                 fi.x, fi.y, fi.w, fi.h, float(fi.rotation))
-            if not (maxx <= om or oX <= minx or maxy <= oy or oY <= miny):
+            sx0, sy0, sx1, sy1 = minx, miny, maxx, maxy
+            if (furniture_type in self._EDGE_SNAP_TYPES
+                    and fi.type in self._EDGE_SNAP_TYPES):
+                pad = max(
+                    0.35,
+                    0.022 * max(sx1 - sx0, sy1 - sy0, oX - om, oY - oy))
+                sx0 += pad
+                sy0 += pad
+                sx1 -= pad
+                sy1 -= pad
+                om += pad
+                oy += pad
+                oX -= pad
+                oY -= pad
+                if sx1 <= sx0 or sy1 <= sy0 or oX <= om or oY <= oy:
+                    continue
+            if not (sx1 <= om or oX <= sx0 or sy1 <= oy or oY <= sy0):
                 return True
         return False
 
     def _outer_wall_buffer_world(self) -> float:
-        """Half of the outer stroke in template space: matches inner half of
-        ``ROOM_POLYGON_OUTLINE_PX`` at the current zoom."""
-        sc = max(0.01, self.renderer.scale)
-        return 0.5 * ROOM_POLYGON_OUTLINE_PX / sc
+        """Half of the door slab in template units (furniture buffer vs outer edge)."""
+        return 0.5 * AUTHOR_WALL_DEPTH_WORLD
 
     def _furniture_hits_walls(
             self, x: float, y: float, w: float, h: float,
             rotation: float = 0.0) -> bool:
         """Rotated furniture footprint: too close to the outer edge or
-        intersecting a thickened interior wall (tight AABB vs wall slab)."""
+        intersecting a thickened interior wall (tight AABB vs wall slab).
+
+        Not used for Door/Window types (they sit on walls by design)."""
         buf = self._outer_wall_buffer_world()
         minx, miny, maxx, maxy = rotated_rect_bounds(x, y, w, h, rotation)
         rw = maxx - minx
@@ -1427,13 +1544,24 @@ class AuthorStage(tk.Frame):
     def _is_furniture_placement_valid(self, x: float, y: float,
                                        w: float, h: float,
                                        rotation: float = 0.0,
-                                       exclude_idx: Optional[int] = None) -> bool:
-        if not self._furniture_inside_room(x, y, w, h, rotation):
+                                       exclude_idx: Optional[int] = None,
+                                       furniture_type: Optional[str] = None
+                                       ) -> bool:
+        """``furniture_type`` forwarded from ``FurnitureItem.type`` so doors and
+        windows skip the usual \"no wall overlap\" rule."""
+        if not self._furniture_inside_room(
+                x, y, w, h, rotation,
+                relax_for_wall_opening=(
+                    furniture_type is not None
+                    and furniture_type in self._EDGE_SNAP_TYPES)):
             return False
-        if self._furniture_hits_walls(x, y, w, h, rotation):
-            return False
+        if (furniture_type is None
+                or furniture_type not in self._EDGE_SNAP_TYPES):
+            if self._furniture_hits_walls(x, y, w, h, rotation):
+                return False
         if self._furniture_overlaps_others(
-                x, y, w, h, rotation=rotation, exclude_idx=exclude_idx):
+                x, y, w, h, rotation=rotation, exclude_idx=exclude_idx,
+                furniture_type=furniture_type):
             return False
         return True
 
@@ -1539,6 +1667,28 @@ class AuthorStage(tk.Frame):
     _OPENING_WALL_MAGNET_PX = 20.0
     _OPENING_WALL_NORMAL_EPS = 1.0
 
+    def _opening_orient_normal_inward(
+            self, qx: float, qy: float,
+            nx: float, ny: float) -> Tuple[float, float]:
+        """Ensure ``(nx,ny)`` points into the room (not outward through the shell)."""
+        poly = self.template.polygon
+        if len(poly) < 3:
+            return nx, ny
+        cc = polygon_centroid(poly)
+        eps = 2e-4
+        pp = point_in_polygon_interior_lenient(
+            (qx + nx * eps, qy + ny * eps), poly, cc)
+        pm = point_in_polygon_interior_lenient(
+            (qx - nx * eps, qy - ny * eps), poly, cc)
+        if pp and not pm:
+            return nx, ny
+        if pm and not pp:
+            return -nx, -ny
+        gcx, gcy = cc
+        if ((gcx - qx) * nx + (gcy - qy) * ny) >= 0:
+            return nx, ny
+        return -nx, -ny
+
     def _opening_edges_by_distance(
             self, cx: float, cy: float,
             ) -> List[Tuple[float, int]]:
@@ -1561,79 +1711,184 @@ class AuthorStage(tk.Frame):
         scored.sort(key=lambda t: t[0])
         return scored
 
+    def _opening_interior_walls_by_distance(
+            self, cx: float, cy: float,
+            ) -> List[Tuple[float, int]]:
+        """Distances from (cx,cy) to interior wall segments, nearest first."""
+        scored: List[Tuple[float, int]] = []
+        for i, wall in enumerate(self.template.walls):
+            ax, ay = wall.x0, wall.y0
+            bx, by = wall.x1, wall.y1
+            ddx, ddy = bx - ax, by - ay
+            L2 = ddx * ddx + ddy * ddy
+            if L2 < 1e-12:
+                continue
+            t = max(0.0, min(1.0, ((cx - ax) * ddx + (cy - ay) * ddy) / L2))
+            qx = ax + t * ddx
+            qy = ay + t * ddy
+            d = math.hypot(qx - cx, qy - cy)
+            scored.append((d, i))
+        scored.sort(key=lambda t: t[0])
+        return scored
+
+    def _opening_snap_to_segment(
+            self, fi: FurnitureItem,
+            cx: float, cy: float,
+            ax: float, ay: float,
+            bx: float, by: float,
+            margin: float,
+            slab_thickness: float,
+            glow_key: Tuple[str, int],
+            ) -> Optional[Tuple[float, float, float, Tuple[str, int],
+                                 float, float]]:
+        """Place a door/window along one wall segment (interior ``Wall`` or
+        polygon perimeter). ``slab_thickness`` matches wall slab depth."""
+        dx, dy = (bx - ax), (by - ay)
+        L = math.hypot(dx, dy)
+        if L < 1e-6:
+            return None
+        tx, ty = dx / L, dy / L
+        nx, ny = -ty, tx
+        theta_deg = math.degrees(math.atan2(dy, dx)) % 360.0
+
+        span_along = float(fi.w)
+        depth = max(float(fi.h), float(slab_thickness))
+
+        if L + 1e-6 < span_along + 2 * margin:
+            return None
+
+        tprm = max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / (L * L)))
+        qx = ax + tprm * dx
+        qy = ay + tprm * dy
+        nx, ny = self._opening_orient_normal_inward(qx, qy, nx, ny)
+
+        s_raw = (qx - ax) * tx + (qy - ay) * ty
+        s_raw = max(0.0, min(L, s_raw))
+        lo = span_along / 2.0 + margin
+        hi = L - span_along / 2.0 - margin
+        if lo > hi + 1e-6:
+            return None
+        span_range = hi - lo
+        seg_n = max(16, min(96, int(span_range / max(1e-6, span_along * 0.06))))
+        s_candidates = {
+            lo + (hi - lo) * (i / max(1, seg_n))
+            for i in range(seg_n + 1)}
+        s_candidates.add(max(lo, min(hi, s_raw)))
+        s_ordered = sorted(s_candidates, key=lambda s: abs(s - s_raw))
+
+        for s_arc in s_ordered:
+            base_cx = ax + tx * s_arc
+            base_cy = ay + ty * s_arc
+            for inset in (0.0, self._OPENING_WALL_NORMAL_EPS):
+                ncx = base_cx + nx * inset
+                ncy = base_cy + ny * inset
+                new_x = ncx - span_along / 2.0
+                new_y = ncy - depth / 2.0
+                if self._is_furniture_placement_valid(
+                        new_x, new_y, span_along, depth,
+                        rotation=theta_deg,
+                        furniture_type=fi.type):
+                    return (
+                        new_x, new_y, theta_deg,
+                        glow_key,
+                        span_along, depth,
+                    )
+        return None
+
+    def _opening_snap_interior(
+            self, fi: FurnitureItem,
+            cx: float, cy: float,
+            wall_idx: int,
+            margin: float,
+            ) -> Optional[Tuple[float, float, float, Tuple[str, int],
+                                 float, float]]:
+        """Door/window snapped to interior ``Wall``."""
+        if not (0 <= wall_idx < len(self.template.walls)):
+            return None
+        wall = self.template.walls[wall_idx]
+        return self._opening_snap_to_segment(
+            fi, cx, cy,
+            wall.x0, wall.y0, wall.x1, wall.y1,
+            margin,
+            float(wall.thickness),
+            ("interior", wall_idx),
+        )
+
+    def _opening_snap_polygon_edge(
+            self, fi: FurnitureItem,
+            cx: float, cy: float,
+            edge_idx: int,
+            poly: List[Tuple[float, float]],
+            margin: float,
+            ) -> Optional[Tuple[float, float, float, Tuple[str, int],
+                                 float, float]]:
+        """Snap to a polygon edge (shell); slab depth matches ``AUTHOR_WALL_DEPTH_WORLD``."""
+        if not (0 <= edge_idx < len(poly)):
+            return None
+        ax, ay = poly[edge_idx]
+        bx, by = poly[(edge_idx + 1) % len(poly)]
+        outline_th = room_outline_thickness_template(self.renderer.scale)
+        return self._opening_snap_to_segment(
+            fi, cx, cy, ax, ay, bx, by,
+            margin,
+            outline_th,
+            ("poly", edge_idx),
+        )
+
     def _try_snap_opening(self, fi: FurnitureItem, x: float, y: float
-                          ) -> Optional[Tuple[float, float, float, int]]:
-        """Snap Door/Window to the best valid polygon edge. Returns
-        ``(new_x, new_y, rotation, edge_idx)`` or ``None``."""
+                          ) -> Optional[Tuple[float, float, float, Tuple[str, int],
+                                              float, float]]:
+        """Snap door/window to nearest wall segment: interior ``Wall`` rows or
+        polygon perimeter edges (each perimeter edge uses the same slab
+        thickness as the room outline stroke)."""
         poly = self.template.polygon
         if len(poly) < 2 or fi.type not in self._EDGE_SNAP_TYPES:
             return None
         cx = x + fi.w / 2.0
         cy = y + fi.h / 2.0
         scale = max(0.01, self.renderer.scale)
+        magnet = self._OPENING_WALL_MAGNET_PX
+        scored_int = self._opening_interior_walls_by_distance(cx, cy)
         scored_edges = self._opening_edges_by_distance(cx, cy)
-        if not scored_edges:
-            return None
-        if scored_edges[0][0] * scale > self._OPENING_WALL_MAGNET_PX:
-            return None
-        margin = self._OPENING_EDGE_INSET
-        bbx, bby, bbw, bbh = self.template.bbox()
-        poly_cx = bbx + bbw / 2.0
-        poly_cy = bby + bbh / 2.0
-        for _dist, edge_idx in scored_edges:
-            ax, ay = poly[edge_idx]
-            bx, by = poly[(edge_idx + 1) % len(poly)]
-            dx, dy = (bx - ax), (by - ay)
-            L = math.hypot(dx, dy)
-            if L < 1e-6:
-                continue
-            tx, ty = dx / L, dy / L
-            nx, ny = -ty, tx
-            theta = math.degrees(math.atan2(dy, dx)) % 360.0
-            candidates = [0, 90, 180, 270]
-            best_rot = float(min(
-                candidates,
-                key=lambda c: min(abs((theta - c) % 360),
-                                 abs((c - theta) % 360))))
-            if best_rot in (90.0, 270.0):
-                eff_w, eff_h = fi.h, fi.w
-            else:
-                eff_w, eff_h = fi.w, fi.h
-            if L + 1e-6 < eff_w + 2 * margin:
-                continue
-            t = max(0.0, min(1.0, ((cx - ax) * dx + (cy - ay) * dy) / (L * L)))
-            qx = ax + t * dx
-            qy = ay + t * dy
-            if (poly_cx - qx) * nx + (poly_cy - qy) * ny < 0:
-                nx, ny = -nx, -ny
-            s_raw = (qx - ax) * tx + (qy - ay) * ty
-            s_raw = max(0.0, min(L, s_raw))
-            lo = eff_w / 2.0 + margin
-            hi = L - eff_w / 2.0 - margin
-            if lo > hi + 1e-6:
-                continue
-            s = max(lo, min(hi, s_raw))
-            base_cx = ax + tx * s
-            base_cy = ay + ty * s
-            for inset in (0.0, self._OPENING_WALL_NORMAL_EPS):
-                new_cx = base_cx + nx * inset
-                new_cy = base_cy + ny * inset
-                new_x = new_cx - fi.w / 2.0
-                new_y = new_cy - fi.h / 2.0
-                if self._is_furniture_placement_valid(
-                        new_x, new_y, fi.w, fi.h, rotation=best_rot):
-                    return (new_x, new_y, best_rot, edge_idx)
-        return None
 
-    def _maybe_snap_to_edge(self, fi: FurnitureItem, x: float, y: float
-                            ) -> Tuple[float, float, float]:
-        """Door/Window: snap to a wall edge or keep position if none fits."""
+        merged: List[Tuple[float, str, int]] = []
+        for dist, wi in scored_int:
+            merged.append((dist, "interior", wi))
+        for dist, ei in scored_edges:
+            merged.append((dist, "poly", ei))
+        merged.sort(key=lambda t: t[0])
+
+        targets = [row for row in merged if row[0] * scale <= magnet]
+
+        margin = self._OPENING_EDGE_INSET
+
+        outcome = None
+        for dist, kind, idx in targets:
+            if kind == "interior":
+                got = self._opening_snap_interior(
+                    fi, cx, cy, idx, margin)
+            else:
+                got = self._opening_snap_polygon_edge(
+                    fi, cx, cy, idx, poly, margin)
+            if got is not None:
+                outcome = got
+                break
+
+        return outcome
+
+    def _maybe_snap_to_edge(
+            self, fi: FurnitureItem, x: float, y: float,
+            ) -> Tuple[float, float, float, float, float]:
+        """Door/Window: snap or keep position.
+
+        Final ``w``/``h`` reflect interior-wall depth overlap when snapped."""
         if fi.type not in self._EDGE_SNAP_TYPES:
-            return x, y, fi.rotation
+            return x, y, fi.rotation, fi.w, fi.h
         got = self._try_snap_opening(fi, x, y)
         if got is None:
-            return x, y, fi.rotation
-        return got[0], got[1], got[2]
+            return x, y, fi.rotation, fi.w, fi.h
+        nx, ny, nrot, _glow, ow, oh = got
+        return nx, ny, nrot, ow, oh
 
     def _opening_edge_glow_from_cursor(self, fi: FurnitureItem) -> None:
         """Set ``_opening_edge_glow`` for hover feedback while armed."""
@@ -1650,18 +1905,26 @@ class AuthorStage(tk.Frame):
         if got is not None:
             self._opening_edge_glow = (got[3], True)
             return
-        scored = self._opening_edges_by_distance(wx, wy)
-        if not scored:
-            self._opening_edge_glow = None
+        scale = max(0.01, self.renderer.scale)
+        magnet_w = self._OPENING_WALL_MAGNET_PX
+        merged = []
+        for dist, wi in self._opening_interior_walls_by_distance(wx, wy):
+            merged.append((dist, "interior", wi))
+        for dist, ei in self._opening_edges_by_distance(wx, wy):
+            merged.append((dist, "poly", ei))
+        merged.sort(key=lambda row: row[0])
+        if merged and merged[0][0] * scale <= magnet_w:
+            kind, ix = merged[0][1], merged[0][2]
+            self._opening_edge_glow = ((kind, ix), False)
         else:
-            self._opening_edge_glow = (scored[0][1], False)
+            self._opening_edge_glow = None
 
     # ------------------------------------------------------------------
     # Wall tool (interior walls; see right sidebar: Draw interior walls)
     # ------------------------------------------------------------------
 
     def _enter_wall_mode(self):
-        """Start wall-drawing: thickness matches outer polygon stroke at this zoom."""
+        """Start wall-drawing: slab thickness matches Door / exterior outline."""
         if self._wall_mode:
             return
         self._armed_furniture_key = None
@@ -1804,38 +2067,44 @@ class AuthorStage(tk.Frame):
                     ccx = fi.x + fi.w / 2.0
                     ccy = fi.y + fi.h / 2.0
                     sc = max(0.01, self.renderer.scale)
-                    near = self._opening_edges_by_distance(ccx, ccy)
-                    if near and near[0][0] * sc > self._OPENING_WALL_MAGNET_PX:
+                    near_poly = self._opening_edges_by_distance(ccx, ccy)
+                    near_int = self._opening_interior_walls_by_distance(ccx, ccy)
+                    near_any = []
+                    if near_poly:
+                        near_any.append((near_poly[0][0], near_poly))
+                    if near_int:
+                        near_any.append((near_int[0][0], near_int))
+                    best_d = (
+                        min(n[0] for n in near_any) if near_any else None)
+                    if (best_d is not None and
+                            best_d * sc > self._OPENING_WALL_MAGNET_PX):
                         self.shell.set_status(
-                            "Windows/doors must be placed ON walls.")
+                            "Place windows/doors on the room perimeter or on "
+                            "interior walls (stay within snapping range).")
                     else:
                         self.shell.set_status(
-                            "Door/Window must go on a wall edge; segment too "
-                            "short or no valid spot against interior walls / "
-                            "overlap.")
+                            "No valid opening here \u2014 segment too short, "
+                            "blocked by overlap, or not inside the room.")
                     self.canvas.bell()
                     return
-                fi.x, fi.y, fi.rotation = got[0], got[1], got[2]
-            # Validate placement: reject if outside room, walls, or overlapping.
-            if not self._furniture_inside_room(
-                    fi.x, fi.y, fi.w, fi.h, fi.rotation):
-                self.shell.set_status(
-                    "Can't place there — furniture must sit inside the room.")
-                self.canvas.bell()
-                return
-            if self._furniture_hits_walls(
-                    fi.x, fi.y, fi.w, fi.h, fi.rotation):
-                self.shell.set_status(
-                    "Can't place there — too close to the outer wall or overlapping "
-                    "an interior wall.")
-                self.canvas.bell()
-                return
-            if self._furniture_overlaps_others(
-                    fi.x, fi.y, fi.w, fi.h, rotation=fi.rotation):
-                self.shell.set_status(
-                    "Can't place there — it would overlap another item.")
-                self.canvas.bell()
-                return
+                nx, ny, nrot, _gk, ow, oh = got
+                fi.x, fi.y, fi.rotation, fi.w, fi.h = nx, ny, nrot, ow, oh
+                if not self._is_furniture_placement_valid(
+                        fi.x, fi.y, fi.w, fi.h,
+                        rotation=fi.rotation,
+                        furniture_type=fi.type):
+                    self.shell.set_status(
+                        "Can't place there \u2014 blocked near walls or overlaps.")
+                    self.canvas.bell()
+                    return
+            else:
+                if not self._is_furniture_placement_valid(
+                        fi.x, fi.y, fi.w, fi.h, rotation=fi.rotation):
+                    self.shell.set_status(
+                        "Can't place there \u2014 blocked or overlaps.")
+                    self.canvas.bell()
+                    return
+
             self._push_undo()
             self.template.furniture.append(fi)
             self._selected_furniture = len(self.template.furniture) - 1
@@ -1870,7 +2139,7 @@ class AuthorStage(tk.Frame):
                 nx, ny, nw, nh = out
                 if self._is_furniture_placement_valid(
                         nx, ny, nw, nh, rotation=fi.rotation,
-                        exclude_idx=idx):
+                        exclude_idx=idx, furniture_type=fi.type):
                     fi.x, fi.y, fi.w, fi.h = nx, ny, nw, nh
             self._redraw()
             return
@@ -1917,17 +2186,22 @@ class AuthorStage(tk.Frame):
             new_x = round(wx / 5) * 5
             new_y = round(wy / 5) * 5
             new_rot = fi.rotation
-            # Door/Window: edge snap while dragging.
+            ow = fi.w
+            oh = fi.h
+            # Door/Window: edge/interior snap while dragging.
             if fi.type in self._EDGE_SNAP_TYPES:
-                new_x, new_y, new_rot = self._maybe_snap_to_edge(
-                    fi, new_x, new_y)
+                new_x, new_y, new_rot, ow, oh = (
+                    self._maybe_snap_to_edge(fi, new_x, new_y))
             is_valid = self._is_furniture_placement_valid(
-                new_x, new_y, fi.w, fi.h, rotation=new_rot,
-                exclude_idx=self._drag_furniture)
+                new_x, new_y, ow, oh, rotation=new_rot,
+                exclude_idx=self._drag_furniture,
+                furniture_type=fi.type)
             if is_valid:
                 fi.x = new_x
                 fi.y = new_y
                 fi.rotation = new_rot
+                fi.w = ow
+                fi.h = oh
                 self._drag_last_valid = (new_x, new_y)
                 self._drag_invalid = False
             else:
@@ -2025,7 +2299,8 @@ class AuthorStage(tk.Frame):
             # Defensive snap-back: ensure final position is valid.
             if not self._is_furniture_placement_valid(
                     fi.x, fi.y, fi.w, fi.h, rotation=fi.rotation,
-                    exclude_idx=self._drag_furniture):
+                    exclude_idx=self._drag_furniture,
+                    furniture_type=fi.type):
                 target = self._drag_last_valid or self._drag_start_pos
                 if target is not None:
                     fi.x, fi.y = target
@@ -2091,15 +2366,20 @@ class AuthorStage(tk.Frame):
         dlg.transient(self)
         frm = tk.Frame(dlg, bg=C["panel"], padx=12, pady=10)
         frm.pack()
-        ws = tk.DoubleVar(value=fi.w); hs = tk.DoubleVar(value=fi.h)
-        tk.Label(frm, text="Width (px)", bg=C["panel"]).grid(row=0, column=0, sticky="w")
+        ws = tk.DoubleVar(value=px_to_ft(fi.w))
+        hs = tk.DoubleVar(value=px_to_ft(fi.h))
+        tk.Label(frm, text="Width (ft)", bg=C["panel"]).grid(row=0, column=0, sticky="w")
         tk.Entry(frm, textvariable=ws, width=8).grid(row=0, column=1, padx=4)
-        tk.Label(frm, text="Height (px)", bg=C["panel"]).grid(row=1, column=0, sticky="w")
+        tk.Label(frm, text="Height (ft)", bg=C["panel"]).grid(row=1, column=0, sticky="w")
         tk.Entry(frm, textvariable=hs, width=8).grid(row=1, column=1, padx=4)
         def apply_():
             self._push_undo()
             try:
-                fi.w = float(ws.get()); fi.h = float(hs.get())
+                w_ft = float(ws.get())
+                h_ft = float(hs.get())
+                if w_ft > 0 and h_ft > 0:
+                    fi.w = ft_to_px(w_ft)
+                    fi.h = ft_to_px(h_ft)
             except Exception:
                 pass
             dlg.destroy()
