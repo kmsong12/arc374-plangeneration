@@ -1,19 +1,11 @@
 """
-ARC374 Final Project - Interactive Hotel Floor Plan Generator
+ARC374 Final Project - Interactive Floor Plan Generator
 Team: Chaemin Lim, Joshua Song, Ahania Soni
 
+Entry point for the 3-stage wizard UI.
 """
 
-import tkinter as tk
-from app import HotelApp
-
-
-def main():
-    root = tk.Tk()
-    root.title("Hotel Floor Plan Generator")
-    root.resizable(True, True)
-    app = HotelApp(root)
-    root.mainloop()
+from app import main
 
 
 if __name__ == "__main__":

@@ -1,0 +1,457 @@
+{
+  "templates": {
+    "2b48a346da": {
+      "label": "BedroomA",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          220,
+          0
+        ],
+        [
+          220,
+          260
+        ],
+        [
+          0,
+          260
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#EBF3FB",
+      "border_color": "#378ADD",
+      "preset_id": "BedroomA"
+    },
+    "a1a3124fdb": {
+      "label": "BedroomB",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          260,
+          0
+        ],
+        [
+          260,
+          180
+        ],
+        [
+          0,
+          180
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#EBF3FB",
+      "border_color": "#378ADD",
+      "preset_id": "BedroomB"
+    },
+    "5969df9d13": {
+      "label": "BedroomC",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          150,
+          0
+        ],
+        [
+          150,
+          150
+        ],
+        [
+          0,
+          150
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#EDF5E2",
+      "border_color": "#639922",
+      "preset_id": "BedroomC"
+    },
+    "d769aec006": {
+      "label": "BedroomD",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          180,
+          0
+        ],
+        [
+          180,
+          320
+        ],
+        [
+          0,
+          320
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#EDF5E2",
+      "border_color": "#639922",
+      "preset_id": "BedroomD"
+    },
+    "8447bd7d74": {
+      "label": "TeaRoom1",
+      "roomtype": "public room",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          220,
+          0
+        ],
+        [
+          220,
+          220
+        ],
+        [
+          0,
+          220
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#FDF3E2",
+      "border_color": "#C27A18",
+      "preset_id": "TeaRoom1"
+    },
+    "fb956f0469": {
+      "label": "TeaRoom2",
+      "roomtype": "public room",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          260,
+          0
+        ],
+        [
+          260,
+          200
+        ],
+        [
+          0,
+          200
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#FDF3E2",
+      "border_color": "#C27A18",
+      "preset_id": "TeaRoom2"
+    },
+    "ec32f9b703": {
+      "label": "Library",
+      "roomtype": "public room",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          400,
+          0
+        ],
+        [
+          400,
+          360
+        ],
+        [
+          0,
+          360
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#FCF0F5",
+      "border_color": "#C8447A",
+      "preset_id": "Library"
+    },
+    "6a4ccfd646": {
+      "label": "ReadingRoom",
+      "roomtype": "public room",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          200,
+          0
+        ],
+        [
+          200,
+          200
+        ],
+        [
+          0,
+          200
+        ]
+      ],
+      "furniture": [],
+      "walls": [],
+      "fill_color": "#F1F0FD",
+      "border_color": "#7B72D8",
+      "preset_id": "ReadingRoom"
+    },
+    "b7f9a468c5": {
+      "label": "test",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          150.0,
+          0.0
+        ],
+        [
+          310.0,
+          50.0
+        ],
+        [
+          310.0,
+          190.0
+        ],
+        [
+          230.0,
+          280.0
+        ],
+        [
+          190.0,
+          280.0
+        ],
+        [
+          150.0,
+          280.0
+        ],
+        [
+          120.0,
+          270.0
+        ],
+        [
+          90.0,
+          270.0
+        ],
+        [
+          70.0,
+          270.0
+        ],
+        [
+          60.0,
+          260.0
+        ],
+        [
+          0.0,
+          200.0
+        ],
+        [
+          30.0,
+          70.0
+        ]
+      ],
+      "furniture": [
+        {
+          "type": "Bed_Twin",
+          "x": 132.16666666666666,
+          "y": 71.44444444444444,
+          "w": 49.0,
+          "h": 96.0,
+          "color": "#E8E0D8",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Toilet",
+          "x": 78.5,
+          "y": 123.05555555555556,
+          "w": 23.0,
+          "h": 35.0,
+          "color": "#FFFFFF",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 113.11111111111111,
+          "y": 203.22222222222223,
+          "w": 46.0,
+          "h": 8.0,
+          "color": "#E3ECF5",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        }
+      ],
+      "walls": [],
+      "fill_color": "#EBF3FB",
+      "border_color": "#378ADD",
+      "preset_id": null
+    },
+    "701e3332b7": {
+      "label": "New Room",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          70.0,
+          0.0
+        ],
+        [
+          110.0,
+          10.0
+        ],
+        [
+          130.0,
+          40.0
+        ],
+        [
+          140.0,
+          80.0
+        ],
+        [
+          120.0,
+          120.0
+        ],
+        [
+          90.0,
+          140.0
+        ],
+        [
+          50.0,
+          140.0
+        ],
+        [
+          20.0,
+          120.0
+        ],
+        [
+          0.0,
+          80.0
+        ],
+        [
+          10.0,
+          40.0
+        ],
+        [
+          30.0,
+          10.0
+        ]
+      ],
+      "furniture": [
+        {
+          "type": "Bed_Twin",
+          "x": -5.611111111111114,
+          "y": 18.111111111111114,
+          "w": 49.0,
+          "h": 96.0,
+          "color": "#E8E0D8",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Couch2",
+          "x": 100.94444444444443,
+          "y": -19.27777777777778,
+          "w": 77,
+          "h": 43,
+          "color": "#B8A898",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Couch3",
+          "x": 72.66666666666666,
+          "y": 43.5,
+          "w": 108,
+          "h": 43,
+          "color": "#B8A898",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairSquare",
+          "x": 151.55555555555554,
+          "y": 90.44444444444443,
+          "w": 28,
+          "h": 28,
+          "color": "#C4B5A0",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairRound",
+          "x": 109.5,
+          "y": 102.27777777777777,
+          "w": 31,
+          "h": 31,
+          "color": "#C4B5A0",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairRound",
+          "x": 65.05555555555554,
+          "y": 92.27777777777777,
+          "w": 31,
+          "h": 31,
+          "color": "#C4B5A0",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Cabinet",
+          "x": -83.0,
+          "y": 142.94444444444443,
+          "w": 46,
+          "h": 23,
+          "color": "#C8B898",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Cabinet",
+          "x": 120.33333333333331,
+          "y": 149.61111111111111,
+          "w": 46,
+          "h": 23,
+          "color": "#C8B898",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        }
+      ],
+      "walls": [],
+      "fill_color": "#EBF3FB",
+      "border_color": "#378ADD",
+      "preset_id": null
+    }
+  }
+}

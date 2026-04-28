@@ -1,9 +1,18 @@
 """
-config.py - All tuneable parameters.
+config.py - Global configuration.
 
+The detailed per-room sizes and color palettes that used to live here
+now live inside the seeded `RoomLibrary` (see `model/room_library.py`)
+and the `furniture_lib` catalog. What remains in this file is the
+top-level canvas geometry, grid / padding defaults, and the bed-length
+anchor used by `units.py`.
+
+A handful of legacy constants (`DEFAULT_WEIGHTS`, `ROOM_COLORS`,
+`ROOM_BORDERS`, `FURNITURE_ITEMS`, ...) are kept so the old `test_suite`
+and `rooms.py` module keep importing without a hard break.
 """
 
-# Canvas & site 
+# --- Canvas / site --------------------------------------------------------
 CANVAS_W = 900
 CANVAS_H = 640
 
@@ -14,10 +23,50 @@ PAD         = 30
 N_ROOMS_DEFAULT = 10
 TRY             = 200
 
-# 0 = all rooms, 1 = bedrooms only, 2 = public rooms only
+# 0 = all rooms, 1 = bedrooms only, 2 = public rooms only  (legacy)
 ROOM_CONSTRAINT = 0
 
-# Room size palettes -----------------------------------------------------
+# --- Bed-length anchor for units.py (do not remove) -----------------------
+BED_LENGTH_FT = 6.5
+BED_LENGTH_PX = 100
+
+# --- UI panels ------------------------------------------------------------
+SIDEBAR_LEFT_W  = 220
+SIDEBAR_RIGHT_W = 240
+TOOLBAR_H       = 44
+STEPBAR_H       = 42
+METRICS_BAR_H   = 28
+
+# --- Room author (Stage 1) -------------------------------------------------
+# Canvas pixels for the room template polygon stroke; must match
+# `RoomCanvasRenderer._draw_template_scaled` create_polygon width.
+ROOM_POLYGON_OUTLINE_PX = 2.0
+
+
+def room_outline_thickness_template(scale: float) -> float:
+    """Template-space thickness for an interior `Wall` so that
+    ``w.thickness * scale`` (screen px) matches `ROOM_POLYGON_OUTLINE_PX`
+    at the time the wall is created at the current zoom `scale`."""
+    return ROOM_POLYGON_OUTLINE_PX / max(float(scale), 1e-6)
+
+# --- Bushes ---------------------------------------------------------------
+N_BUSHES     = 30
+BUSH_TRY     = 200
+BUSH_R_RANGE = (8, 16)
+BUSH_PAD     = 15
+
+# --- Colours (minimal, most now come from theme.py / library) -------------
+SITE_BG      = "#FAFAF6"
+SITE_BORDER  = "#1a1a1a"
+CANVAS_BG    = "#E8E6DE"
+BUSH_COLOR   = "#1A8A60"
+LABEL_COLOR  = "#444444"
+
+# ======================================================================
+# Legacy (kept only to satisfy `rooms.py` and the old test suite).  New
+# code must prefer `model.room_library` and `model.furniture_lib`.
+# ======================================================================
+
 A_SIZES  = [(160, 220), (180, 240), (200, 260)]
 B_SIZES  = [(240, 160), (260, 180), (280, 190)]
 C_SIZES  = [(125, 125), (150, 150), (130, 130)]
@@ -33,13 +82,6 @@ DEFAULT_WEIGHTS = {
     "TeaRoom1":    1/8, "TeaRoom2": 1/8,
     "Library":     1/8, "ReadingRoom": 1/8,
 }
-
-# Colors -------------------------------------------------------------------
-SITE_BG      = "#FAFAF6"
-SITE_BORDER  = "#1a1a1a"
-CANVAS_BG    = "#E8E6DE"
-BUSH_COLOR   = "#1A8A60"
-LABEL_COLOR  = "#444444"
 
 ROOM_COLORS = {
     "BedroomA":    "#EBF3FB",
@@ -63,19 +105,7 @@ ROOM_BORDERS = {
     "ReadingRoom": "#7B72D8",
 }
 
-# Bushes ---------------------------------------------------------------
-N_BUSHES     = 30
-BUSH_TRY     = 200
-BUSH_R_RANGE = (8, 16)
-BUSH_PAD     = 15
-
-# Panel sizes --------------------------------------------------------
-SIDEBAR_LEFT_W  = 192
-SIDEBAR_RIGHT_W = 215
-TOOLBAR_H       = 40
-METRICS_BAR_H   = 28
-
-# Furniture items (drag from library) --------------------------------
+# legacy furniture constants (unused by new stages; tests may import)
 FURNITURE_ITEMS = {
     "Table":    {"w": 60,  "h": 80},
     "Chair":    {"w": 32,  "h": 32},
