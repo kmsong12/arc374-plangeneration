@@ -2889,6 +2889,7 @@ class CustomFurnitureEditor(tk.Toplevel):
         paper = tk.LabelFrame(
             left, text="Drawing area", bg=C["panel"], fg=C["text"],
             font=("Helvetica", 9, "bold"), bd=1, relief="flat", padx=4, pady=4)
+        paper.pack(fill="both", expand=True)
         opts = tk.Frame(paper, bg=C["panel"])
         opts.pack(fill="x", pady=(0, 4))
         tk.Checkbutton(
@@ -3015,6 +3016,8 @@ class CustomFurnitureEditor(tk.Toplevel):
             flat.extend((ox + rx * s, oy + ry * s))
         flat.extend((flat[0], flat[1]))
         c.create_line(*flat, fill="#E85D24", width=2, dash=(3, 2))
+
+    def _select_tool(self, name: str) -> None:
         self.active_tool.set(name)
         for k, fr in self._tool_frames.items():
             on = (k == name)
