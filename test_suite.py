@@ -27,7 +27,8 @@ from geometry_utils import (
     snap_to_grid,
 )
 from hotel import Hotel
-from packing import pack_rooms_into_hotel
+from model.room_template import RoomTemplate
+from packing import pack_rooms_into_hotel, random_pack
 from rooms import (
     ROOM_CLASSES,
     BedroomA, BedroomB, BedroomC, BedroomD,
@@ -520,6 +521,72 @@ class TestPackRoomsIntoHotel(unittest.TestCase):
         h = pack_rooms_into_hotel(PACK_SITE, 10, seed=2, constraint=0, weights=weights)
         for room in h.rooms:
             self.assertEqual(room.label, "BedroomA")
+
+
+class TestRandomPackLabelProximity(unittest.TestCase):
+    """Template-library packing: same-label proximity bias."""
+
+    @staticmethod
+    def _avg_pairwise_center_distance(plan):
+        rs = plan.rooms
+        n = len(rs)
+        if n < 2:
+            return float("inf")
+        pts = []
+        for r in rs:
+            bx, by, bw, bh = r.world_bbox()
+            pts.append((bx + bw * 0.5, by + bh * 0.5))
+        total = 0.0
+        c = 0
+        for i in range(n):
+            for j in range(i + 1, n):
+                dx = pts[i][0] - pts[j][0]
+                dy = pts[i][1] - pts[j][1]
+                total += (dx * dx + dy * dy) ** 0.5
+                c += 1
+        return total / c
+
+    def test_high_label_proximity_reduces_spread(self):
+        t1 = RoomTemplate.rectangle("ClumpLab", 100, 80, roomtype="bedroom")
+        t2 = RoomTemplate.rectangle("ClumpLab", 90, 75, roomtype="bedroom")
+
+        class _Lib:
+            def all(self):
+                return [("ka", t1), ("kb", t2)]
+
+        lib = _Lib()
+        site = (0, 0, 2800, 2200)
+
+        sum0 = sum1 = 0.0
+        trials = 45
+        for seed in range(1, trials + 1):
+            p0 = random_pack(
+                lib, site, n_rooms=14, seed=seed, pad=24,
+                label_proximity=0.0)
+            p1 = random_pack(
+                lib, site, n_rooms=14, seed=seed, pad=24,
+                label_proximity=1.0)
+            self.assertEqual(len(p0.rooms), 14)
+            self.assertEqual(len(p1.rooms), 14)
+            sum0 += self._avg_pairwise_center_distance(p0)
+            sum1 += self._avg_pairwise_center_distance(p1)
+
+        self.assertLess(
+            sum1 / trials, sum0 / trials,
+            msg="mean pairwise distance should drop when label_proximity is high")
+
+    def test_group_by_roomtype_smoke(self):
+        t_a = RoomTemplate.rectangle("Alpha", 90, 70, roomtype="type_a")
+        t_b = RoomTemplate.rectangle("Beta", 85, 65, roomtype="type_b")
+
+        class _Lib:
+            def all(self):
+                return [("ka", t_a), ("kb", t_b)]
+
+        plan = random_pack(
+            _Lib(), (0, 0, 2200, 1800), n_rooms=8, seed=11, pad=28,
+            label_proximity=0.75, group_by_roomtype=True)
+        self.assertGreaterEqual(len(plan.rooms), 1)
 
 
 # ------------------------------------------------------------------------

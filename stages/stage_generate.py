@@ -381,6 +381,25 @@ class RandomMode(tk.Frame):
         slider(self._left, "Padding (px)", self._pad, 0, 100, 5)
         self._bedroom_bias = tk.IntVar(value=50)
         slider(self._left, "Bedroom bias (%)", self._bedroom_bias, 0, 100, 5)
+        self._label_proximity = tk.IntVar(value=0)
+        slider(self._left, "Same-label proximity (%)", self._label_proximity,
+               0, 100, 5)
+        tk.Label(
+            self._left,
+            text="Higher values favor rooms in the same group near each other "
+                 "(see Group by).",
+            bg=C["panel"], fg=C["text_dim"], font=("Helvetica", 8),
+            wraplength=SIDEBAR_LEFT_W - 20, justify="left",
+        ).pack(anchor="w", padx=16, pady=(0, 2))
+        gb_row = tk.Frame(self._left, bg=C["panel"])
+        gb_row.pack(fill="x", padx=10, pady=(0, 6))
+        tk.Label(gb_row, text="Group by:", bg=C["panel"],
+                 fg=C["text_dim"], font=("Helvetica", 9)).pack(side="left")
+        self._proximity_group = tk.StringVar(value="Template label")
+        ttk.Combobox(
+            gb_row, textvariable=self._proximity_group, width=16,
+            values=("Template label", "Room type"), state="readonly",
+        ).pack(side="left", padx=4)
         self._bush_density = tk.IntVar(value=30)
         slider(self._left, "Bush count", self._bush_density, 0, 80, 2)
         self._seed = tk.IntVar(value=random.randint(1, 99999))
@@ -452,6 +471,7 @@ class RandomMode(tk.Frame):
         bias = self._bedroom_bias.get() / 100.0
         weights["#bedroom"] = 0.2 + bias
         weights["#public room"] = 0.2 + (1 - bias) * 0.8
+        group_by_roomtype = self._proximity_group.get() == "Room type"
         plan = random_pack(
             self.library,
             site=self.plan.site,
@@ -460,6 +480,8 @@ class RandomMode(tk.Frame):
             weights=weights,
             seed=self._seed.get(),
             pad=self._pad.get(),
+            label_proximity=self._label_proximity.get() / 100.0,
+            group_by_roomtype=group_by_roomtype,
         )
         plan.site = self.plan.site
         plan.bushes = pack_bushes(plan.site, plan,

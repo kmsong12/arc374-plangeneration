@@ -61,6 +61,34 @@ Candidate = Tuple[str, RoomTemplate, float]  # (key, template, weight)
 
 DEFAULT_TRY = 200
 
+# Maps UI 0–1 label proximity into actual center-pull strength. Full 1.0 would
+# collapse placements onto the affinity centroid and make overlap checks fail.
+_LABEL_PULL_SCALE = 0.34
+
+
+def _affinity_anchor(
+        rooms: List[RoomInstance],
+        tpl: RoomTemplate,
+        group_by_roomtype: bool,
+        ) -> Optional[Tuple[float, float]]:
+    """Centroid of bbox centers for placed rooms matching template label or roomtype."""
+    sx = sy = 0.0
+    n = 0
+    for r in rooms:
+        if group_by_roomtype:
+            if r.roomtype != tpl.roomtype:
+                continue
+        else:
+            if r.label != tpl.label:
+                continue
+        bx, by, bw, bh = r.world_bbox()
+        sx += bx + bw * 0.5
+        sy += by + bh * 0.5
+        n += 1
+    if n == 0:
+        return None
+    return (sx / n, sy / n)
+
 
 def _layout_effective_pad(base_pad: int, layout_style: str,
                           min_center_distance: float) -> int:
@@ -81,6 +109,8 @@ def _sample_xy(
         grid: int,
         clustering: float,
         layout_style: str,
+        label_anchor: Optional[Tuple[float, float]] = None,
+        label_pull: float = 0.0,
         ) -> Optional[Tuple[float, float]]:
     """Return a candidate ``(x, y)`` for bbox origin or ``None`` if degenerate."""
     if rw < tw or rh < th:
@@ -91,6 +121,8 @@ def _sample_xy(
     hi_y = float(ry0 + rh - th)
     if hi_x < lo_x or hi_y < lo_y:
         return None
+
+    lp = float(max(0.0, min(1.0, label_pull))) * _LABEL_PULL_SCALE
 
     reg_cx = (lo_x + hi_x) / 2.0
     reg_cy = (lo_y + hi_y) / 2.0
@@ -125,6 +157,17 @@ def _sample_xy(
         y = uy * (1.0 - clustering) + target_y * clustering
         x = max(lo_x, min(hi_x, x))
         y = max(lo_y, min(hi_y, y))
+
+    # Pull room bbox *center* toward same-label / same-type centroid (anchor is
+    # in center space). Blending origins toward anchors skews footprint geometry.
+    if label_anchor is not None and lp > 0:
+        ax, ay = label_anchor
+        ccx = x + tw * 0.5
+        ccy = y + th * 0.5
+        ccx = ccx * (1.0 - lp) + ax * lp
+        ccy = ccy * (1.0 - lp) + ay * lp
+        x = max(lo_x, min(hi_x, ccx - tw * 0.5))
+        y = max(lo_y, min(hi_y, ccy - th * 0.5))
 
     return (snap_to_grid(x, grid), snap_to_grid(y, grid))
 
@@ -205,6 +248,8 @@ def pack_rooms(site: Tuple[int, int, int, int],
                layout_style: str = "mixed",
                try_multiplier: float = 1.0,
                rooms_per_zone: Optional[List[int]] = None,
+               label_proximity: float = 0.0,
+               group_by_roomtype: bool = False,
                ) -> Plan:
     """
     Dart-throw ``n_rooms`` instances into the site (or per-zone quotas).
@@ -224,6 +269,7 @@ def pack_rooms(site: Tuple[int, int, int, int],
     sx, sy, sw, sh = site
     clump = float(max(0.0, min(1.0, clustering)))
     lst = str(layout_style or "mixed").lower()
+    lpull = float(max(0.0, min(1.0, label_proximity)))
 
     existing_boxes: List[Tuple[int, int, int, int]] = []
     if existing:
@@ -246,8 +292,12 @@ def pack_rooms(site: Tuple[int, int, int, int],
             rx0, ry0, rw, rh = region
             if tw >= rw or th >= rh:
                 continue
+            anchor = (_affinity_anchor(plan.rooms, tpl, group_by_roomtype)
+                      if lpull > 0 else None)
+            eff_lp = lpull if anchor is not None else 0.0
             xy = _sample_xy(rx0, ry0, rw, rh, tw, th, sx, sy, sw, sh,
-                            grid, clump, lst)
+                            grid, clump, lst,
+                            label_anchor=anchor, label_pull=eff_lp)
             if xy is None:
                 continue
             x, y = xy
@@ -338,10 +388,15 @@ def random_pack(library: RoomLibrary,
                 enabled_types: Optional[List[str]] = None,
                 weights: Optional[Dict[str, float]] = None,
                 seed: Optional[int] = None,
-                pad: int = 30) -> Plan:
+                pad: int = 30,
+                label_proximity: float = 0.0,
+                group_by_roomtype: bool = False,
+                ) -> Plan:
     cands = _candidates_from_library(library, enabled_types, weights)
     return pack_rooms(site=site, candidates=cands,
-                      n_rooms=n_rooms, seed=seed, pad=pad)
+                      n_rooms=n_rooms, seed=seed, pad=pad,
+                      label_proximity=label_proximity,
+                      group_by_roomtype=group_by_roomtype)
 
 
 def zone_pack(library: RoomLibrary,
