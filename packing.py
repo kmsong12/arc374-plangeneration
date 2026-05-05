@@ -70,12 +70,21 @@ def _affinity_anchor(
         rooms: List[RoomInstance],
         tpl: RoomTemplate,
         group_by_roomtype: bool,
+        affinity_labels: Optional[Sequence[str]] = None,
         ) -> Optional[Tuple[float, float]]:
-    """Centroid of bbox centers for placed rooms matching template label or roomtype."""
+    """Centroid of bbox centers for placed rooms matching an affinity target."""
+    label_targets = {
+        str(x).strip().lower()
+        for x in (affinity_labels or [])
+        if str(x).strip()
+    }
     sx = sy = 0.0
     n = 0
     for r in rooms:
-        if group_by_roomtype:
+        if label_targets:
+            if r.label.strip().lower() not in label_targets:
+                continue
+        elif group_by_roomtype:
             if r.roomtype != tpl.roomtype:
                 continue
         else:
@@ -250,6 +259,7 @@ def pack_rooms(site: Tuple[int, int, int, int],
                rooms_per_zone: Optional[List[int]] = None,
                label_proximity: float = 0.0,
                group_by_roomtype: bool = False,
+               proximity_rules: Optional[Dict[str, List[str]]] = None,
                ) -> Plan:
     """
     Dart-throw ``n_rooms`` instances into the site (or per-zone quotas).
@@ -292,8 +302,14 @@ def pack_rooms(site: Tuple[int, int, int, int],
             rx0, ry0, rw, rh = region
             if tw >= rw or th >= rh:
                 continue
-            anchor = (_affinity_anchor(plan.rooms, tpl, group_by_roomtype)
-                      if lpull > 0 else None)
+            affinity_targets: Optional[List[str]] = None
+            if proximity_rules:
+                affinity_targets = proximity_rules.get(tpl.label)
+                if affinity_targets is None and getattr(tpl, "preset_id", None):
+                    affinity_targets = proximity_rules.get(str(tpl.preset_id))
+            anchor = (_affinity_anchor(
+                plan.rooms, tpl, group_by_roomtype, affinity_targets)
+                if lpull > 0 else None)
             eff_lp = lpull if anchor is not None else 0.0
             xy = _sample_xy(rx0, ry0, rw, rh, tw, th, sx, sy, sw, sh,
                             grid, clump, lst,
@@ -320,6 +336,7 @@ def pack_rooms(site: Tuple[int, int, int, int],
     if zones:
         nz = len(zones)
         alloc = _allocate_rooms_per_zone(n_rooms, nz, rooms_per_zone)
+        zone_candidate_lists: List[List[Candidate]] = []
         for zi, zone in enumerate(zones):
             plan.zones.append(zone)
             zone_cands = candidates
@@ -332,9 +349,18 @@ def pack_rooms(site: Tuple[int, int, int, int],
                         zw = zone_w.get(f"#{t.roomtype}", 0.0)
                     if zw > 0:
                         zone_cands.append((k, t, float(zw)))
+            zone_candidate_lists.append(zone_cands)
             n_here = alloc[zi] if zi < len(alloc) else max(1, n_rooms // nz)
             for _ in range(max(0, n_here)):
                 _try_place(zone_cands, zone)
+        if rooms_per_zone is None and len(plan.rooms) < n_rooms:
+            stalled = 0
+            zi = 0
+            while len(plan.rooms) < n_rooms and stalled < max(1, nz):
+                before = len(plan.rooms)
+                _try_place(zone_candidate_lists[zi], zones[zi])
+                stalled = stalled + 1 if len(plan.rooms) == before else 0
+                zi = (zi + 1) % nz
     else:
         for _ in range(n_rooms):
             _try_place(candidates, site)
@@ -353,7 +379,10 @@ def pack_bushes(site: Tuple[int, int, int, int],
                 r_range: Tuple[int, int] = (8, 16),
                 pad: int = 15,
                 grid: int = 10,
-                tries: int = 200) -> List[Tuple[int, int, int]]:
+                tries: int = 200,
+                zones: Optional[List[Tuple[int, int, int, int]]] = None,
+                exclude_zones: Optional[List[Tuple[int, int, int, int]]] = None
+                ) -> List[Tuple[int, int, int]]:
     if seed is not None:
         random.seed(seed + 1)
 
@@ -364,11 +393,21 @@ def pack_bushes(site: Tuple[int, int, int, int],
         room_boxes.append((int(x), int(y), int(w), int(h)))
     bushes: List[Tuple[int, int, int]] = []
     bush_boxes: List[Tuple[int, int, int, int]] = []
+    regions = zones or [site]
+    blocked = exclude_zones or []
     for _ in range(n_bushes):
         for _a in range(tries):
             r = random.randint(*r_range)
-            x = snap_to_grid(random.uniform(sx + 2 * r, sx + sw - 2 * r), grid)
-            y = snap_to_grid(random.uniform(sy + 2 * r, sy + sh - 2 * r), grid)
+            rx, ry, rw, rh = random.choice(regions)
+            if rw <= 4 * r or rh <= 4 * r:
+                continue
+            x = snap_to_grid(random.uniform(rx + 2 * r, rx + rw - 2 * r), grid)
+            y = snap_to_grid(random.uniform(ry + 2 * r, ry + rh - 2 * r), grid)
+            if x < sx or y < sy or x > sx + sw or y > sy + sh:
+                continue
+            if any(zx <= x <= zx + zw and zy <= y <= zy + zh
+                   for zx, zy, zw, zh in blocked):
+                continue
             box = (x - 2 * r, y - 2 * r, 4 * r, 4 * r)
             if (not overlaps_any(box, room_boxes, pad=pad) and
                     not overlaps_any(box, bush_boxes, pad=pad)):
@@ -391,12 +430,14 @@ def random_pack(library: RoomLibrary,
                 pad: int = 30,
                 label_proximity: float = 0.0,
                 group_by_roomtype: bool = False,
+                proximity_rules: Optional[Dict[str, List[str]]] = None,
                 ) -> Plan:
     cands = _candidates_from_library(library, enabled_types, weights)
     return pack_rooms(site=site, candidates=cands,
                       n_rooms=n_rooms, seed=seed, pad=pad,
                       label_proximity=label_proximity,
-                      group_by_roomtype=group_by_roomtype)
+                      group_by_roomtype=group_by_roomtype,
+                      proximity_rules=proximity_rules)
 
 
 def zone_pack(library: RoomLibrary,
@@ -611,17 +652,23 @@ def _merge_zone_spec_weights(
         full_w: Dict[str, float],
         spec: dict,
         ) -> Dict[str, float]:
-    """Single zone weight map: template key -> float."""
+    """Single zone weight map: template key -> float.
+
+    Explicit zone weights are exclusionary: if a zone says {"Library": 1},
+    every unmentioned template is 0 in that zone. Without explicit weights,
+    the zone inherits the global LLM weights.
+    """
     raw = spec.get("weights")
+    has_explicit = isinstance(raw, dict) and bool(raw)
     out: Dict[str, float] = {}
     for key, tpl in library.all():
         w = None
-        if isinstance(raw, dict):
+        if has_explicit:
             w = raw.get(tpl.label)
             if w is None:
                 w = raw.get(f"#{tpl.roomtype}")
         if w is None:
-            w = full_w.get(key, 0.0)
+            w = 0.0 if has_explicit else full_w.get(key, 0.0)
         out[key] = max(0.0, float(w))
     return out
 
@@ -647,6 +694,40 @@ def _apply_roomtype_weights(
         rt = tpl.roomtype
         if rt in rtw:
             full_w[key] *= max(0.0, float(rtw[rt]))
+
+
+def _coerce_proximity_rules_for_library(
+        library: RoomLibrary,
+        raw: object,
+        ) -> Dict[str, List[str]]:
+    """Normalize label/preset proximity rules to known template labels."""
+    if not isinstance(raw, dict):
+        return {}
+    aliases: Dict[str, str] = {}
+    for _key, tpl in library.all():
+        aliases[tpl.label.strip().lower()] = tpl.label
+        if getattr(tpl, "preset_id", None):
+            aliases[str(tpl.preset_id).strip().lower()] = tpl.label
+
+    out: Dict[str, List[str]] = {}
+    for src_raw, targets_raw in raw.items():
+        src = aliases.get(str(src_raw).strip().lower())
+        if not src:
+            continue
+        if isinstance(targets_raw, str):
+            targets_iter = [targets_raw]
+        elif isinstance(targets_raw, (list, tuple)):
+            targets_iter = list(targets_raw)
+        else:
+            continue
+        targets: List[str] = []
+        for trg_raw in targets_iter:
+            trg = aliases.get(str(trg_raw).strip().lower())
+            if trg and trg not in targets:
+                targets.append(trg)
+        if targets:
+            out[src] = targets
+    return out
 
 
 def _enabled_types_from_settings(settings: dict) -> Optional[List[str]]:
@@ -708,6 +789,13 @@ def pack_from_llm_settings(
 
     try_mult = float(settings.get("entropy") or 1.0)
     try_mult = max(0.3, min(4.0, try_mult))
+    label_proximity = float(settings.get("label_proximity") or 0.0)
+    label_proximity = max(0.0, min(1.0, label_proximity))
+    group_by_roomtype = bool(settings.get("group_by_roomtype"))
+    proximity_rules = _coerce_proximity_rules_for_library(
+        library, settings.get("proximity_rules"))
+    if proximity_rules:
+        label_proximity = max(label_proximity, 0.85)
 
     rooms_pz = settings.get("rooms_per_zone")
     zs_norm = settings.get("zones_normalized")
@@ -753,6 +841,9 @@ def pack_from_llm_settings(
         try_multiplier=try_mult,
         rooms_per_zone=(
             rooms_pz if isinstance(rooms_pz, list) else None),
+        label_proximity=label_proximity,
+        group_by_roomtype=group_by_roomtype,
+        proximity_rules=proximity_rules,
     )
 
     if zones and zone_weights:
@@ -779,7 +870,33 @@ def pack_bushes_for_llm(
     pad_b = 15
     if bp is not None:
         pad_b = max(0, min(120, int(bp)))
-    return pack_bushes(site, plan, seed=seed, n_bushes=nb, pad=pad_b)
+    bush_zones = None
+    bz = settings.get("bush_zones_normalized")
+    if isinstance(bz, list) and bz:
+        rel = []
+        for z in bz:
+            if isinstance(z, (list, tuple)) and len(z) >= 4:
+                rel.append((float(z[0]), float(z[1]), float(z[2]), float(z[3])))
+            elif isinstance(z, dict):
+                rel.append((float(z.get("x", 0)), float(z.get("y", 0)),
+                            float(z.get("w", 1)), float(z.get("h", 1))))
+        bush_zones = _pixel_zones_from_normalized(site, rel) or None
+
+    exclude_zones = None
+    bx = settings.get("bush_exclude_zones_normalized")
+    if isinstance(bx, list) and bx:
+        relx = []
+        for z in bx:
+            if isinstance(z, (list, tuple)) and len(z) >= 4:
+                relx.append((float(z[0]), float(z[1]), float(z[2]), float(z[3])))
+            elif isinstance(z, dict):
+                relx.append((float(z.get("x", 0)), float(z.get("y", 0)),
+                             float(z.get("w", 1)), float(z.get("h", 1))))
+        exclude_zones = _pixel_zones_from_normalized(site, relx) or None
+
+    return pack_bushes(
+        site, plan, seed=seed, n_bushes=nb, pad=pad_b,
+        zones=bush_zones, exclude_zones=exclude_zones)
 
 
 # ---------------------------------------------------------------------------

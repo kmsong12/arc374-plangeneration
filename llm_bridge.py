@@ -295,7 +295,7 @@ def _coerce_zones_specs(
                 wmap: Dict[str, float] = {}
                 for k, val in wraw.items():
                     try:
-                        wmap[str(k)] = max(0.0, float(val))
+                        wmap[_normalize_weight_key(k)] = max(0.0, float(val))
                     except (TypeError, ValueError):
                         pass
                 if not wmap:
@@ -320,6 +320,49 @@ def _coerce_roomtype_weights(raw: Any) -> Union[Dict[str, float], None]:
             except (TypeError, ValueError):
                 continue
     return out if out else None
+
+
+def _normalize_weight_key(raw: Any) -> str:
+    """Normalize model/user-friendly zone weight keys to packer keys."""
+    s = str(raw).strip()
+    low = re.sub(r"[\s_\-]+", " ", s.lower()).strip()
+    compact = re.sub(r"[^a-z0-9]+", "", low)
+    label_aliases = {
+        "bedrooma": "BedroomA",
+        "bedroomtypea": "BedroomA",
+        "typea": "BedroomA",
+        "bedroomb": "BedroomB",
+        "bedroomtypeb": "BedroomB",
+        "typeb": "BedroomB",
+        "bedroomc": "BedroomC",
+        "bedroomtypec": "BedroomC",
+        "typec": "BedroomC",
+        "bedroomd": "BedroomD",
+        "bedroomtyped": "BedroomD",
+        "typed": "BedroomD",
+        "tearoom1": "TeaRoom1",
+        "tearoom2": "TeaRoom2",
+        "library": "Library",
+        "readingroom": "ReadingRoom",
+    }
+    if compact in label_aliases:
+        return label_aliases[compact]
+    if s in DEFAULT_WEIGHTS:
+        return s
+    if low in ("bedroom", "bedrooms", "private", "private room", "private rooms"):
+        return "#bedroom"
+    if low in (
+            "public", "public room", "public rooms", "publicroom",
+            "publicrooms", "communal", "shared", "shared room",
+            "shared rooms"):
+        return "#public room"
+    if s.startswith("#"):
+        tag = low.lstrip("#").strip()
+        if tag in ("bedroom", "bedrooms"):
+            return "#bedroom"
+        if tag in ("public", "public room", "public rooms"):
+            return "#public room"
+    return s
 
 
 def _coerce_enabled_roomtypes(raw: Any) -> Optional[List[str]]:
@@ -372,6 +415,7 @@ def _merge_prompt_roomtypes(
     merged = dict(settings)
     if had_api_list:
         _downgrade_spatial_for_single_roomtype(merged)
+        merged = _augment_settings_from_prompt(user_prompt, merged)
         # #region agent log
         er = merged.get("enabled_roomtypes")
         _agent_log(
@@ -383,7 +427,7 @@ def _merge_prompt_roomtypes(
 
     inferred = _infer_roomtypes_from_prompt(user_prompt)
     if not inferred:
-        return merged
+        return _augment_settings_from_prompt(user_prompt, merged)
 
     merged["enabled_roomtypes"] = inferred
     cw = dict(merged.get("weights") or {})
@@ -401,7 +445,7 @@ def _merge_prompt_roomtypes(
             "spatial": merged.get("spatial"),
         })
     # #endregion
-    return merged
+    return _augment_settings_from_prompt(user_prompt, merged)
 
 
 def _coerce_rooms_per_zone(raw: Any, n_zone: int) -> Union[List[int], None]:
@@ -419,6 +463,187 @@ def _coerce_rooms_per_zone(raw: Any, n_zone: int) -> Union[List[int], None]:
     if sum(acc) <= 0:
         return None
     return acc[:n_zone]
+
+
+def _coerce_label_list(raw: Any) -> List[str]:
+    if isinstance(raw, str):
+        items = [raw]
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        return []
+    out: List[str] = []
+    for item in items:
+        key = _normalize_weight_key(item)
+        if key in DEFAULT_WEIGHTS and key not in out:
+            out.append(key)
+    return out
+
+
+def _coerce_proximity_rules(raw: Any) -> Dict[str, List[str]]:
+    """
+    Normalize {"BedroomA":["BedroomB"]} style rules. These drive placement
+    anchors in the packer and are stronger than same-label clustering.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, List[str]] = {}
+    for src_raw, targets_raw in raw.items():
+        src = _normalize_weight_key(src_raw)
+        if src not in DEFAULT_WEIGHTS:
+            continue
+        targets = _coerce_label_list(targets_raw)
+        if targets:
+            out[src] = targets
+    return out
+
+
+def _prompt_zone_rect(tag: str) -> Dict[str, float]:
+    rects = {
+        "nw": {"x": 0.02, "y": 0.02, "w": 0.46, "h": 0.46},
+        "ne": {"x": 0.52, "y": 0.02, "w": 0.46, "h": 0.46},
+        "sw": {"x": 0.02, "y": 0.52, "w": 0.46, "h": 0.46},
+        "se": {"x": 0.52, "y": 0.52, "w": 0.46, "h": 0.46},
+        "center": {"x": 0.32, "y": 0.32, "w": 0.36, "h": 0.36},
+        "north": {"x": 0.02, "y": 0.02, "w": 0.96, "h": 0.30},
+        "south": {"x": 0.02, "y": 0.68, "w": 0.96, "h": 0.30},
+        "west": {"x": 0.02, "y": 0.02, "w": 0.30, "h": 0.96},
+        "east": {"x": 0.68, "y": 0.02, "w": 0.30, "h": 0.96},
+    }
+    return dict(rects[tag])
+
+
+def _prompt_zone_specs_from_text(text: str) -> Tuple[List[Dict[str, float]], List[Dict[str, Any]]]:
+    tl = (text or "").lower()
+    region_patterns = [
+        ("nw", r"(north\s*west|northwest|upper\s+left|top\s+left|\bnw\b)"),
+        ("ne", r"(north\s*east|northeast|upper\s+right|top\s+right|\bne\b)"),
+        ("sw", r"(south\s*west|southwest|lower\s+left|bottom\s+left|\bsw\b)"),
+        ("se", r"(south\s*east|southeast|lower\s+right|bottom\s+right|\bse\b)"),
+        ("center", r"(center|centre|middle)"),
+        ("north", r"\bnorth(?:ern)?\b|\btop\b"),
+        ("south", r"\bsouth(?:ern)?\b|\bbottom\b"),
+        ("west", r"\bwest(?:ern)?\b|\bleft\b"),
+        ("east", r"\beast(?:ern)?\b|\bright\b"),
+    ]
+    zones: List[Dict[str, float]] = []
+    specs: List[Dict[str, Any]] = []
+    seen: set = set()
+    for tag, pat in region_patterns:
+        m = re.search(pat, tl)
+        if not m:
+            continue
+        before = max(tl.rfind(",", 0, m.start()),
+                     tl.rfind(";", 0, m.start()),
+                     tl.rfind(".", 0, m.start()))
+        afters = [
+            p for p in (
+                tl.find(",", m.end()),
+                tl.find(";", m.end()),
+                tl.find(".", m.end()),
+            )
+            if p >= 0
+        ]
+        lo = before + 1 if before >= 0 else max(0, m.start() - 45)
+        hi = min(afters) if afters else min(len(tl), m.end() + 70)
+        ctx = tl[lo:hi]
+        weights: Optional[Dict[str, float]] = None
+        if re.search(r"library\s+only|only\s+library", ctx):
+            weights = {"Library": 1.0}
+        elif re.search(r"(bedroom\s*(type\s*)?a|type\s*a)\s+only|only\s+(bedroom\s*(type\s*)?a|type\s*a)", ctx):
+            weights = {"BedroomA": 1.0}
+        elif re.search(r"(bedroom\s*(type\s*)?b|type\s*b)\s+only|only\s+(bedroom\s*(type\s*)?b|type\s*b)", ctx):
+            weights = {"BedroomB": 1.0}
+        elif re.search(r"(bedroom\s*(type\s*)?c|type\s*c)\s+only|only\s+(bedroom\s*(type\s*)?c|type\s*c)", ctx):
+            weights = {"BedroomC": 1.0}
+        elif re.search(r"(bedroom\s*(type\s*)?d|type\s*d)\s+only|only\s+(bedroom\s*(type\s*)?d|type\s*d)", ctx):
+            weights = {"BedroomD": 1.0}
+        elif re.search(r"(public\s*rooms?|publicrooms?|communal|shared).{0,20}only|only.{0,20}(public\s*rooms?|publicrooms?|communal|shared)", ctx):
+            weights = {"#public room": 1.0}
+        elif re.search(r"bedrooms?.{0,20}only|only.{0,20}bedrooms?", ctx):
+            weights = {"#bedroom": 1.0}
+        if weights and tag not in seen:
+            zones.append(_prompt_zone_rect(tag))
+            specs.append({"max": 40, "weights": weights})
+            seen.add(tag)
+    return zones, specs
+
+
+def _augment_settings_from_prompt(user_prompt: str, settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Add deterministic constraints for common studio-review prompt phrases."""
+    out = dict(settings)
+    tl = (user_prompt or "").lower()
+
+    zones, specs = _prompt_zone_specs_from_text(user_prompt)
+    if zones:
+        out["zones_normalized"] = zones
+        out["zones_specs"] = specs
+        wanted_roomtypes: set = set()
+        weights = dict(out.get("weights") or {})
+        for spec in specs:
+            for key in (spec.get("weights") or {}):
+                nk = _normalize_weight_key(key)
+                if nk == "#bedroom":
+                    wanted_roomtypes.add("bedroom")
+                    for lk in ("BedroomA", "BedroomB", "BedroomC", "BedroomD"):
+                        weights[lk] = max(float(weights.get(lk, 0.0)), 1.0)
+                elif nk == "#public room":
+                    wanted_roomtypes.add("public room")
+                    for lk in ("TeaRoom1", "TeaRoom2", "Library", "ReadingRoom"):
+                        weights[lk] = max(float(weights.get(lk, 0.0)), 1.0)
+                elif nk in DEFAULT_WEIGHTS:
+                    weights[nk] = max(float(weights.get(nk, 0.0)), 1.0)
+                    wanted_roomtypes.add(_preset_label_roomcategory(nk))
+        if weights:
+            out["weights"] = weights
+        if len(wanted_roomtypes) > 1:
+            out.pop("enabled_roomtypes", None)
+
+    prox = dict(out.get("proximity_rules") or {})
+    for src, trg in re.findall(
+            r"(bedroom\s*(?:type\s*)?[a-d]|type\s*[a-d]|Bedroom[A-D])"
+            r".{0,40}?(?:next\s+to|near|adjacent\s+to|beside)"
+            r".{0,20}?(bedroom\s*(?:type\s*)?[a-d]|type\s*[a-d]|Bedroom[A-D])",
+            user_prompt, flags=re.I):
+        s = _normalize_weight_key(src)
+        t = _normalize_weight_key(trg)
+        if s in DEFAULT_WEIGHTS and t in DEFAULT_WEIGHTS:
+            prox.setdefault(s, [])
+            if t not in prox[s]:
+                prox[s].append(t)
+    if prox:
+        out["proximity_rules"] = _coerce_proximity_rules(prox)
+        out["label_proximity"] = max(float(out.get("label_proximity", 0.0)), 0.9)
+
+    center = _prompt_zone_rect("center")
+    if re.search(
+            r"\b(greenery\s*heavy|heavy\s*greenery|lots?\s+of\s+(bushes|trees|green)|"
+            r"lush|dense\s+(green|landscape)|forest)\b",
+            tl):
+        out["n_bushes"] = max(int(out.get("n_bushes", 0) or 0), 88)
+    elif re.search(
+            r"\b(light|sparse|minimal|low)\s+(greenery|bushes|trees|green)\b",
+            tl):
+        out["n_bushes"] = max(int(out.get("n_bushes", 0) or 0), 16)
+    elif re.search(r"\b(greenery|bushes?|trees?|landscap|green\s+space)\b", tl):
+        out["n_bushes"] = max(int(out.get("n_bushes", 0) or 0), 45)
+
+    center_greenery_only = re.search(
+        r"(only\s+greenery.{0,35}(center|centre|middle)|"
+        r"greenery\s+only.{0,35}(center|centre|middle)|"
+        r"(center|centre|middle).{0,35}only\s+greenery|"
+        r"(center|centre|middle).{0,35}greenery\s+only)",
+        tl)
+    if center_greenery_only:
+        out["bush_zones_normalized"] = [center]
+    if re.search(r"(surrounding|around|perimeter|edges?).{0,35}greenery|greenery.{0,35}(surrounding|around|perimeter|edges?)", tl):
+        out["bush_exclude_zones_normalized"] = [center]
+    if re.search(r"(no|without|none).{0,20}(center|centre|middle).{0,35}greenery|greenery.{0,35}(no|without|none).{0,20}(center|centre|middle)", tl):
+        out["bush_exclude_zones_normalized"] = [center]
+    if out.get("bush_exclude_zones_normalized") and not center_greenery_only:
+        out.pop("bush_zones_normalized", None)
+
+    return out
 
 
 def _normalize_llm_orientation(raw: Any) -> str:
@@ -482,8 +707,25 @@ Custom zoning (overrides "spatial" when both set): use together
   — one entry per zone (same order as zones_normalized).
 - "rooms_per_zone": [int, ...] — room counts per zone (optional; must match zone count).
 
+For exact zone requests, use zero weights for disallowed templates/categories. Examples:
+  northwest corner only public rooms => zone weights {"#public room":1}
+  southeast corner only BedroomA => {"BedroomA":1}
+  center library only => {"Library":1}
+
+Proximity:
+- "label_proximity": float 0-1. Use 0.7-1.0 when rooms should be near,
+  adjacent, clustered, or next to related rooms.
+- "group_by_roomtype": boolean. true clusters same roomtypes.
+- "proximity_rules": object mapping template labels to target labels, e.g.
+  {"BedroomA":["BedroomB"]} means BedroomA should be generated near BedroomB.
+
 Landscape:
 - "bush_pad": int 0–120 — clearing around bushes.
+
+- "bush_zones_normalized": optional zones where bushes/greenery may appear.
+- "bush_exclude_zones_normalized": optional zones where bushes/greenery may not appear.
+Use center zone {"x":0.33,"y":0.33,"w":0.34,"h":0.34} for "greenery in center".
+Use bush_exclude_zones_normalized with that center zone for "surrounding greenery, none in center".
 
 Orientation (post-placement rotation spike):
 - "orientation_goal": "mixed" | "inward_collaborative" | "outward_private"
@@ -627,6 +869,17 @@ def _coerce_settings(data: dict) -> dict:
     if "bush_pad" in data:
         settings["bush_pad"] = max(0, min(120, int(data["bush_pad"])))
 
+    lp = _clamp_float01(data.get("label_proximity"))
+    if lp is not None:
+        settings["label_proximity"] = lp
+    if "group_by_roomtype" in data:
+        settings["group_by_roomtype"] = bool(data.get("group_by_roomtype"))
+    pr = _coerce_proximity_rules(data.get("proximity_rules"))
+    if pr:
+        settings["proximity_rules"] = pr
+        settings["label_proximity"] = max(
+            float(settings.get("label_proximity", 0.0)), 0.85)
+
     zm = _coerce_zones_normalized(data.get("zones_normalized"))
     if zm:
         settings["zones_normalized"] = zm
@@ -637,6 +890,13 @@ def _coerce_settings(data: dict) -> dict:
         rpz = _coerce_rooms_per_zone(data.get("rooms_per_zone"), ns)
         if rpz:
             settings["rooms_per_zone"] = rpz
+
+    bzm = _coerce_zones_normalized(data.get("bush_zones_normalized"))
+    if bzm:
+        settings["bush_zones_normalized"] = bzm
+    bxm = _coerce_zones_normalized(data.get("bush_exclude_zones_normalized"))
+    if bxm:
+        settings["bush_exclude_zones_normalized"] = bxm
 
     oo = _normalize_llm_orientation(data.get("orientation_goal"))
     if oo != "mixed":

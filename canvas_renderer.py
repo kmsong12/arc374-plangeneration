@@ -980,20 +980,25 @@ class PlanCanvasRenderer:
         if tpl.preset_id:
             bx, by, bw, bh = room.world_bbox()
             sbx, sby = self._w2s(bx, by)
-            sw = bw * vp
-            sh = bh * vp
+            _tbx, _tby, tbw, tbh = tpl.bbox()
+            unrot_w = tbw * vp
+            unrot_h = tbh * vp
             renderer = PRESET_RENDERERS.get(tpl.preset_id)
             if renderer:
                 try:
                     if abs(rot_deg) < 0.08 or abs(rot_deg - 360.0) < 0.08:
-                        renderer(c, sbx, sby, sw, sh)
+                        renderer(c, sbx, sby, unrot_w, unrot_h)
                     else:
                         rad = math.radians(rot_deg)
-                        scx = sbx + sw * 0.5
-                        scy = sby + sh * 0.5
+                        rot_w = bw * vp
+                        rot_h = bh * vp
+                        draw_x = sbx + (rot_w - unrot_w) * 0.5
+                        draw_y = sby + (rot_h - unrot_h) * 0.5
+                        scx = sbx + rot_w * 0.5
+                        scy = sby + rot_h * 0.5
                         proxy = RotatedCanvasProxy(
                             c, scx, scy, math.cos(rad), math.sin(rad))
-                        renderer(proxy, sbx, sby, sw, sh)
+                        renderer(proxy, draw_x, draw_y, unrot_w, unrot_h)
                 except Exception:
                     pass
 
@@ -1033,12 +1038,32 @@ class PlanCanvasRenderer:
                 nw, nh = fh, fw
             else:
                 nx, ny, nw, nh = ix, iy, fw, fh
-            placed = FurnitureItem(
-                type=fi.type, x=0, y=0, w=nw, h=nh,
-                color=fi.color, rotation=fi.rotation, custom_id=fi.custom_id)
             ax, ay = self._w2s(bx + nx, by + ny)
-            _draw_furniture_scaled_rotated(
-                c, placed, ax, ay, float(nw) * vp, float(nh) * vp)
+            alloc_w = float(nw) * vp
+            alloc_h = float(nh) * vp
+            if rot == 0:
+                placed = FurnitureItem(
+                    type=fi.type, x=0, y=0, w=nw, h=nh,
+                    color=fi.color, rotation=fi.rotation,
+                    custom_id=fi.custom_id, label=fi.label)
+                _draw_furniture_scaled_rotated(
+                    c, placed, ax, ay, alloc_w, alloc_h)
+            else:
+                orig_w = float(fw) * vp
+                orig_h = float(fh) * vp
+                draw_x = ax + (alloc_w - orig_w) * 0.5
+                draw_y = ay + (alloc_h - orig_h) * 0.5
+                cx = ax + alloc_w * 0.5
+                cy = ay + alloc_h * 0.5
+                rad = math.radians(float(rot))
+                proxy = RotatedCanvasProxy(
+                    c, cx, cy, math.cos(rad), math.sin(rad))
+                placed = FurnitureItem(
+                    type=fi.type, x=0, y=0, w=fw, h=fh,
+                    color=fi.color, rotation=fi.rotation,
+                    custom_id=fi.custom_id, label=fi.label)
+                _draw_furniture_scaled_rotated(
+                    proxy, placed, draw_x, draw_y, orig_w, orig_h)
 
         if room.pinned:
             bx, by, bw, bh = room.world_bbox()

@@ -488,55 +488,533 @@
       "border_color": "#378ADD",
       "preset_id": null
     },
-    "e8800c8160": {
-      "label": "b1",
-      "roomtype": "cluster1",
+    "0e8e15bf2e": {
+      "label": "12poly",
+      "roomtype": "bedroom",
       "polygon": [
         [
-          110.0,
+          180.0,
           0.0
         ],
         [
+          240.0,
+          40.0
+        ],
+        [
+          280.0,
+          110.0
+        ],
+        [
+          280.0,
+          180.0
+        ],
+        [
+          240.0,
+          240.0
+        ],
+        [
           180.0,
-          30.0
+          280.0
         ],
         [
-          220.0,
-          90.0
-        ],
-        [
-          210.0,
-          160.0
-        ],
-        [
-          150.0,
-          210.0
-        ],
-        [
-          70.0,
-          210.0
-        ],
-        [
-          10.0,
-          170.0
-        ],
-        [
-          0.0,
-          90.0
+          100.0,
+          280.0
         ],
         [
           40.0,
-          30.0
+          240.0
+        ],
+        [
+          0.0,
+          180.0
+        ],
+        [
+          0.0,
+          110.0
+        ],
+        [
+          40.0,
+          40.0
+        ],
+        [
+          100.0,
+          0.0
         ]
       ],
       "furniture": [
         {
-          "type": "Bed_King",
-          "x": 61.5,
-          "y": 26.0,
-          "w": 97,
-          "h": 103,
+          "type": "Bed_Twin",
+          "x": 113.83333333333334,
+          "y": 1.4444444444444429,
+          "w": 49.0,
+          "h": 96.0,
           "color": "#E8E0D8",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Table",
+          "x": 7.555555555555554,
+          "y": 110.22222222222223,
+          "w": 46.0,
+          "h": 69.0,
+          "color": "#D4C5A9",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairRound",
+          "x": 57.83333333333333,
+          "y": 128.66666666666666,
+          "w": 31.0,
+          "h": 31.0,
+          "color": "#C4B5A0",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Door",
+          "x": 257.5,
+          "y": 142.77777777777777,
+          "w": 43.0,
+          "h": 5.0,
+          "color": "#B08968",
+          "rotation": 270.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 120.0,
+          "y": 275.0,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 180.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 186.23076923076923,
+          "y": 258.0128205128205,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 146.30993247402023,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "TableSmall",
+          "x": 64.5,
+          "y": 20.888888888888886,
+          "w": 31.0,
+          "h": 31.0,
+          "color": "#D4C5A9",
+          "rotation": 60.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Bookshelf",
+          "x": 165.0,
+          "y": 145.0,
+          "w": 54.0,
+          "h": 15.0,
+          "color": "#B08968",
+          "rotation": 90.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Bookshelf",
+          "x": 165.0,
+          "y": 90.0,
+          "w": 54.0,
+          "h": 15.0,
+          "color": "#B08968",
+          "rotation": 90.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Cabinet",
+          "x": 54.77777777777777,
+          "y": 235.44444444444443,
+          "w": 46.0,
+          "h": 23.0,
+          "color": "#C8B898",
+          "rotation": 30.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Bookshelf",
+          "x": 165.0,
+          "y": 35.0,
+          "w": 54.0,
+          "h": 15.0,
+          "color": "#B08968",
+          "rotation": 270.0,
+          "custom_id": null,
+          "label": null
+        }
+      ],
+      "walls": [
+        {
+          "x0": 180.0,
+          "y0": 0.0,
+          "x1": 180.0,
+          "y1": 180.0,
+          "thickness": 0.3,
+          "color": "#378ADD"
+        }
+      ],
+      "fill_color": "#fdebd0",
+      "border_color": "#378ADD",
+      "preset_id": null
+    },
+    "2c7254ae0f": {
+      "label": "15polybed",
+      "roomtype": "bedroom",
+      "polygon": [
+        [
+          192.5,
+          0.0
+        ],
+        [
+          262.5,
+          17.5
+        ],
+        [
+          332.5,
+          70.0
+        ],
+        [
+          367.5,
+          140.0
+        ],
+        [
+          385.0,
+          210.0
+        ],
+        [
+          367.5,
+          280.0
+        ],
+        [
+          297.5,
+          350.0
+        ],
+        [
+          227.5,
+          385.0
+        ],
+        [
+          157.5,
+          385.0
+        ],
+        [
+          87.5,
+          350.0
+        ],
+        [
+          17.5,
+          297.5
+        ],
+        [
+          0.0,
+          210.0
+        ],
+        [
+          17.5,
+          140.0
+        ],
+        [
+          52.5,
+          70.0
+        ],
+        [
+          122.5,
+          17.5
+        ]
+      ],
+      "furniture": [
+        {
+          "type": "Bed_Queen",
+          "x": 149.63327032136107,
+          "y": 14.728733459357287,
+          "w": 77.0,
+          "h": 103.0,
+          "color": "#E8E0D8",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Door",
+          "x": 327.9033043779982,
+          "y": 103.54267673349622,
+          "w": 43.0,
+          "h": 5.0,
+          "color": "#B08968",
+          "rotation": 243.43494882292202,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Couch2",
+          "x": 148.9054820415879,
+          "y": 301.63799621928166,
+          "w": 77.0,
+          "h": 43.0,
+          "color": "#B8A898",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 171.6833648393195,
+          "y": 381.5,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 180.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 99.61909262759924,
+          "y": 365.0595463137996,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 206.565051177078,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 240.68038564835643,
+          "y": 363.2917731870719,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 153.434948822922,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Table",
+          "x": 47.9593572778828,
+          "y": 236.2372400756144,
+          "w": 46.0,
+          "h": 69.0,
+          "color": "#D4C5A9",
+          "rotation": 90.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Table",
+          "x": 120.01039697542535,
+          "y": 236.2372400756144,
+          "w": 46.0,
+          "h": 69.0,
+          "color": "#D4C5A9",
+          "rotation": 90.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairSquare",
+          "x": 59.87051039697543,
+          "y": 214.5255198487713,
+          "w": 28.0,
+          "h": 28.0,
+          "color": "#C4B5A0",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairSquare",
+          "x": 126.09924385633272,
+          "y": 215.25330812854443,
+          "w": 28.0,
+          "h": 28.0,
+          "color": "#C4B5A0",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Cabinet",
+          "x": 25.397920604914937,
+          "y": 98.3960302457467,
+          "w": 46.0,
+          "h": 23.0,
+          "color": "#C8B898",
+          "rotation": 120.0,
+          "custom_id": null,
+          "label": null
+        }
+      ],
+      "walls": [
+        {
+          "x0": 262.5,
+          "y0": 17.5,
+          "x1": 260.0,
+          "y1": 210.0,
+          "thickness": 0.3,
+          "color": "#378ADD"
+        },
+        {
+          "x0": 17.5,
+          "y0": 297.5,
+          "x1": 260.0,
+          "y1": 300.0,
+          "thickness": 0.3,
+          "color": "#378ADD"
+        }
+      ],
+      "fill_color": "#EBF3FB",
+      "border_color": "#378ADD",
+      "preset_id": null
+    },
+    "5b5ff04718": {
+      "label": "smallcabin",
+      "roomtype": "cabin",
+      "polygon": [
+        [
+          140.0,
+          0.0
+        ],
+        [
+          190.0,
+          30.0
+        ],
+        [
+          220.0,
+          80.0
+        ],
+        [
+          220.0,
+          140.0
+        ],
+        [
+          190.0,
+          190.0
+        ],
+        [
+          140.0,
+          220.0
+        ],
+        [
+          80.0,
+          220.0
+        ],
+        [
+          30.0,
+          190.0
+        ],
+        [
+          0.0,
+          140.0
+        ],
+        [
+          0.0,
+          80.0
+        ],
+        [
+          30.0,
+          30.0
+        ],
+        [
+          80.0,
+          0.0
+        ]
+      ],
+      "furniture": [
+        {
+          "type": "Bed_Twin",
+          "x": 88.27777777777777,
+          "y": 3.3888888888888857,
+          "w": 49,
+          "h": 96,
+          "color": "#E8E0D8",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Door",
+          "x": 89.61111111111111,
+          "y": 216.5,
+          "w": 43.0,
+          "h": 5.0,
+          "color": "#B08968",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 196.0,
+          "y": 103.88888888888889,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 90.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Window",
+          "x": 180.38270315271885,
+          "y": 163.2518441138535,
+          "w": 46.0,
+          "h": 5.0,
+          "color": "#E3ECF5",
+          "rotation": 120.96375653207352,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Cabinet",
+          "x": 168.66666666666666,
+          "y": 51.0,
+          "w": 46,
+          "h": 23,
+          "color": "#C8B898",
+          "rotation": 240.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "Table",
+          "x": 5.333333333333332,
+          "y": 75.77777777777777,
+          "w": 46,
+          "h": 69,
+          "color": "#D4C5A9",
+          "rotation": 0.0,
+          "custom_id": null,
+          "label": null
+        },
+        {
+          "type": "ChairRound",
+          "x": 53.388888888888886,
+          "y": 94.77777777777777,
+          "w": 31,
+          "h": 31,
+          "color": "#C4B5A0",
           "rotation": 0.0,
           "custom_id": null,
           "label": null

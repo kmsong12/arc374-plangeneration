@@ -1002,6 +1002,23 @@ class TestCoerceRichSettings(unittest.TestCase):
         self.assertGreater(r["weights"]["BedroomA"], 0.0)
         self.assertEqual(r["spatial"], "mixed")
 
+    def test_zone_weight_aliases_and_proximity_rules_coerce(self):
+        r = _bridge._coerce_settings({
+            "weights": DEFAULT_WEIGHTS,
+            "zones_normalized": [
+                {"x": 0.5, "y": 0.5, "w": 0.4, "h": 0.4},
+            ],
+            "zones_specs": [
+                {"weights": {"publicrooms": 1, "bedroom type A": 2}},
+            ],
+            "proximity_rules": {"bedroom A": ["bedroomB"]},
+        })
+        zw = r["zones_specs"][0]["weights"]
+        self.assertEqual(zw["#public room"], 1.0)
+        self.assertEqual(zw["BedroomA"], 2.0)
+        self.assertEqual(r["proximity_rules"], {"BedroomA": ["BedroomB"]})
+        self.assertGreaterEqual(r["label_proximity"], 0.85)
+
 
 class TestMergePromptRoomtypes(unittest.TestCase):
     """``_merge_prompt_roomtypes``: NL inference when API omits enabled types."""
@@ -1025,6 +1042,34 @@ class TestMergePromptRoomtypes(unittest.TestCase):
             "only bedrooms please", raw, base)
         self.assertEqual(m.get("enabled_roomtypes"), ["public room"])
 
+    def test_prompt_exact_zones_and_greenery_are_augmented(self):
+        raw = {"weights": DEFAULT_WEIGHTS}
+        base = _bridge._coerce_settings(raw)
+        m = _bridge._merge_prompt_roomtypes(
+            "northwest corner only publicrooms, southeast corner only "
+            "bedroom type A, center library only, surrounding greenery "
+            "without any in center",
+            raw, base)
+        specs = m.get("zones_specs") or []
+        self.assertGreaterEqual(len(specs), 3)
+        weight_sets = [s["weights"] for s in specs]
+        self.assertIn({"#public room": 1.0}, weight_sets)
+        self.assertIn({"BedroomA": 1.0}, weight_sets)
+        self.assertIn({"Library": 1.0}, weight_sets)
+        self.assertNotIn("enabled_roomtypes", m)
+        self.assertGreaterEqual(m.get("n_bushes", 0), 40)
+        self.assertIn("bush_exclude_zones_normalized", m)
+        self.assertNotIn("bush_zones_normalized", m)
+
+    def test_prompt_next_to_adds_proximity_rule(self):
+        raw = {"weights": DEFAULT_WEIGHTS}
+        base = _bridge._coerce_settings(raw)
+        m = _bridge._merge_prompt_roomtypes(
+            "have bedroom A only generate next to bedroomB",
+            raw, base)
+        self.assertEqual(m["proximity_rules"], {"BedroomA": ["BedroomB"]})
+        self.assertGreaterEqual(m["label_proximity"], 0.9)
+
 
 class TestPackFromLlmEnabledRoomtypes(unittest.TestCase):
     """``pack_from_llm_settings`` honors enabled room categories."""
@@ -1045,6 +1090,42 @@ class TestPackFromLlmEnabledRoomtypes(unittest.TestCase):
         self.assertGreater(len(plan.rooms), 0)
         for ri in plan.rooms:
             self.assertEqual(ri.template_snapshot.roomtype, "bedroom")
+
+    def test_explicit_zone_weights_are_exclusionary(self):
+        from model.room_library import get_library
+        from packing import pack_from_llm_settings
+
+        library = get_library()
+        site = (0, 0, 2200, 1600)
+        settings = {
+            "weights": dict(DEFAULT_WEIGHTS),
+            "n_rooms": 6,
+            "zones_normalized": [
+                {"x": 0.02, "y": 0.02, "w": 0.30, "h": 0.30},
+                {"x": 0.38, "y": 0.35, "w": 0.26, "h": 0.30},
+                {"x": 0.68, "y": 0.68, "w": 0.30, "h": 0.30},
+            ],
+            "zones_specs": [
+                {"weights": {"#public room": 1}},
+                {"weights": {"Library": 1}},
+                {"weights": {"BedroomA": 1}},
+            ],
+            "rooms_per_zone": [2, 1, 2],
+            "pad": 20,
+        }
+        plan = pack_from_llm_settings(library, site, settings, seed=7)
+        self.assertGreaterEqual(len(plan.rooms), 3)
+        for room in plan.rooms:
+            bx, by, bw, bh = room.world_bbox()
+            cx = bx + bw / 2
+            cy = by + bh / 2
+            label = room.template_snapshot.label
+            if cx < site[2] * 0.35 and cy < site[3] * 0.35:
+                self.assertEqual(room.template_snapshot.roomtype, "public room")
+            elif site[2] * 0.38 <= cx <= site[2] * 0.64 and site[3] * 0.35 <= cy <= site[3] * 0.65:
+                self.assertEqual(label, "Library")
+            elif cx > site[2] * 0.65 and cy > site[3] * 0.65:
+                self.assertEqual(label, "BedroomA")
 
 
 class TestDemoNlSettings(unittest.TestCase):

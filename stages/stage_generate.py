@@ -134,9 +134,16 @@ class GenerateStage(tk.Frame):
 # ---------------------------------------------------------------------------
 
 def _default_generation_site() -> Tuple[int, int, int, int]:
-    """Default parcel for Random / Zoning / LLM: 80 ft × 60 ft (W × H)."""
+    """Default parcel for Random / Zoning: 80 ft x 60 ft (W x H)."""
     sw = int(ft_to_px(80.0))
     sh = int(ft_to_px(60.0))
+    return (SITE_MARGIN, SITE_MARGIN, sw, sh)
+
+
+def _default_llm_generation_site() -> Tuple[int, int, int, int]:
+    """Default parcel for LLM prompts: 180 ft x 160 ft (W x H)."""
+    sw = int(ft_to_px(180.0))
+    sh = int(ft_to_px(160.0))
     return (SITE_MARGIN, SITE_MARGIN, sw, sh)
 
 
@@ -908,7 +915,7 @@ class LLMMode(tk.Frame):
         self.shell = shell
         self.library: RoomLibrary = shell.room_library
         self.plan = Plan()
-        self.plan.site = _default_generation_site()
+        self.plan.site = _default_llm_generation_site()
         self._site_w_var: Optional[tk.StringVar] = None
         self._site_h_var: Optional[tk.StringVar] = None
         self._build_layout()
